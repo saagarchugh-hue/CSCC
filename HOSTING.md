@@ -1,0 +1,122 @@
+# Hosting the Merchant Success Command Center for Affirm
+
+So everyone at Affirm can access the dashboard, you can host it in one of these ways.
+
+---
+
+## Can the dashboard be hosted on Notion?
+
+**Notion cannot host this dashboard as a native page.** Notion doesn’t run custom HTML/JavaScript apps. You have two practical options:
+
+1. **Embed the dashboard in Notion**  
+   Host the dashboard somewhere else (internal server, Railway, Render, etc.) so it has a **public or internal URL**. Then in a Notion page, use **Embed** (type `/embed` or use the “…” menu → Embed) and paste that URL. Notion will show it in an iframe.  
+   - The URL must be reachable from the browser (e.g. `https://your-dashboard.railway.app` or `http://your-internal-server:5000` if your network allows).  
+   - Some Notion setups restrict which domains can be embedded; if the embed is blocked, your admin may need to allow the domain or you’ll need to use a link instead of an embed.
+
+2. **Use Notion only as a link**  
+   Put the dashboard URL in a Notion page as a normal link. People click through to open the full dashboard in a new tab. No embed, but no Notion restrictions.
+
+So: **host the app elsewhere, then either embed that URL in Notion or link to it from Notion.**
+
+---
+
+## Deploy without API keys (for testing / pitching)
+
+You can deploy the app **with no API keys set**. The dashboard loads, filters and search work, and the table is fully usable. The “Generate email” and “Latest news” buttons will show a short message: *“Email generation is not configured for this deployment…”* and *“Latest news is not configured for this deployment…”*. Add API keys later when you’re ready to enable those features.
+
+**Steps:**
+
+1. **Build the dashboard once** (on your machine, where the Excel/CSV lives):
+   ```bash
+   python build_dashboard.py
+   ```
+   Commit `dashboard.html` (and optionally `merchant_success_command_center.csv` if you don’t commit the Excel) so the deployed app has data.
+
+2. **Push to GitHub** (or GitLab, etc.).
+
+3. **Deploy to Render or Railway** (no env vars required):
+   - **Render:** New → Web Service → connect repo. Build: `pip install -r requirements.txt`. Start: `python app.py`. Leave “Environment” empty.
+   - **Railway:** New project → Deploy from repo. It will use the `Procfile` (`web: python app.py`). No variables needed.
+   - Both use the `PORT` env var automatically; the app already reads it.
+
+4. Open the generated URL. Use the dashboard; when you click “Generate email” or “Latest news”, you’ll see the friendly “not configured” message until you add the corresponding API keys in the host’s environment.
+
+---
+
+## Option 1: Internal server / VM (recommended for “everyone at Affirm”)
+
+Run the Flask app on a machine that’s reachable on your internal network (e.g. a shared VM or server).
+
+1. **On the server**
+   - Clone or copy this project.
+   - Install dependencies: `pip install -r requirements.txt` (or use the project’s `.venv`).
+   - Set API keys (for AI features):
+     - `OPENAI_API_KEY` – required for “Generate email”.
+     - `GEMINI_API_KEY` – optional; for “Latest news” via Gemini + Google Search (recommended).
+     - `NEWS_API_KEY` and/or `SERPER_API_KEY` – optional fallbacks for “Latest news” (see [app.py](app.py) and [API keys](#api-keys) below).
+   - Build the dashboard once: `python build_dashboard.py`.
+   - Start the app:
+     ```bash
+     flask run --host=0.0.0.0 --port=5000
+     ```
+     Or: `python app.py`
+
+2. **Share the URL**
+   - From other machines on the same network: `http://<server-ip>:5000`
+   - Example: `http://10.0.1.50:5000` (use your server’s real IP or hostname).
+
+3. **Optional**
+   - Run behind a reverse proxy (e.g. nginx) with HTTPS and/or SSO if your company uses it.
+   - Use a process manager (systemd, supervisord) or a production WSGI server (e.g. `gunicorn`) so it stays up after you log out.
+
+---
+
+## Option 2: Cloud deployment (Railway, Render, Fly.io, etc.)
+
+Deploy the Flask app so it’s reachable via a public URL (you can still restrict access with auth or VPN).
+
+1. **Prepare**
+   - Ensure `dashboard.html` is generated and committed (or generated in the deploy step).
+   - In the cloud dashboard, set:
+     - `OPENAI_API_KEY`
+     - `NEWS_API_KEY` and/or `SERPER_API_KEY` (optional)
+
+2. **Example: Railway / Render**
+   - Connect the repo; set build command to `pip install -r requirements.txt` and run `python build_dashboard.py` if you generate the HTML at deploy time.
+   - Start command: `gunicorn -w 1 -b 0.0.0.0:$PORT app:app` (or `flask run --host=0.0.0.0` if the platform sets `PORT`).
+   - Share the generated URL (e.g. `https://your-app.railway.app`) with the team.
+
+3. **Access control**
+   - Add HTTP basic auth, or put the app behind your company’s SSO/proxy so only Affirm users can access it.
+
+---
+
+## Option 3: Static dashboard only (no AI features)
+
+If you don’t need “Generate email” or “Latest news” on the server:
+
+1. Run `python build_dashboard.py` to generate `dashboard.html`.
+2. Host that single file:
+   - **Internal:** Put `dashboard.html` on a shared drive or internal site (e.g. Confluence, SharePoint, or any internal static host). People open the file or link; filters and search work, but the two buttons will show “Run the Flask server for AI features” unless they point to your server.
+   - **With AI:** Serve the same file from the Flask app (Option 1 or 2) so the buttons work for everyone.
+
+---
+
+## API keys (for AI features)
+
+- **OPENAI_API_KEY** – Required for “Generate email”. Create an API key in the [OpenAI dashboard](https://platform.openai.com/api-keys).
+- **GEMINI_API_KEY** – Optional; used for “Latest news” via **Gemini + Google Search grounding**. Get a key at [Google AI Studio](https://aistudio.google.com/apikey). Install the SDK: `pip install google-genai`. When set, the news button uses Gemini first; falls back to News API or Serper if Gemini is unavailable.
+- **NEWS_API_KEY** – Optional; fallback for “Latest news”. Free tier at [newsapi.org](https://newsapi.org/). Set in the environment on the server where Flask runs.
+- **SERPER_API_KEY** – Optional; alternative fallback for “Latest news” (Google search via [serper.dev](https://serper.dev)). Set in the environment; see [app.py](app.py).
+
+If keys are not set, the dashboard still loads; the email and news buttons will return a clear error asking for the relevant key or for the Flask server to be running.
+
+---
+
+## Quick checklist for “everyone at Affirm”
+
+- [ ] Run `python build_dashboard.py` to create `dashboard.html`.
+- [ ] Run the Flask app with `flask run --host=0.0.0.0` (or deploy to a cloud host).
+- [ ] Set `OPENAI_API_KEY` (and optionally news keys) where the app runs.
+- [ ] Share the URL (e.g. `http://<internal-server>:5000` or your cloud URL).
+- [ ] (Optional) Add auth or put the app behind company SSO for access control.

@@ -41,6 +41,14 @@ You can deploy the app **with no API keys set**. The dashboard loads, filters an
 
 4. Open the generated URL. Use the dashboard; when you click “Generate email” or “Latest news”, you’ll see the friendly “not configured” message until you add the corresponding API keys in the host’s environment.
 
+**Deploy from your machine (Railway CLI):**
+
+1. Install the CLI once: `npm install -g @railway/cli`
+2. Log in (opens browser): `railway login`
+3. From the project folder run: `./deploy.sh`  
+   Or: `railway init --name cscc-dashboard` then `railway up`
+4. Railway will print your live URL; or run `railway open` to open it.
+
 ---
 
 ## Option 1: Internal server / VM (recommended for “everyone at Affirm”)

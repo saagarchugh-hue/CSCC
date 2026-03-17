@@ -512,7 +512,7 @@ def build_html(data_json: str) -> str:
         const articles = data.articles || [];
         const summary = data.summary || '';
         if (articles.length === 0 && !summary) {{
-          body.innerHTML = '<p class="text-muted">No recent articles found. Set GEMINI_API_KEY, NEWS_API_KEY, or SERPER_API_KEY (see app.py).</p>';
+          body.innerHTML = '<p class="text-muted">No recent news returned. Set OPENAI_API_KEY (or other news APIs) in your server environment and redeploy.</p>';
           btn.disabled = false;
           btn.textContent = 'Latest news';
           return;

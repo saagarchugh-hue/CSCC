@@ -45,9 +45,28 @@ You can deploy the app **with no API keys set**. The dashboard loads, filters an
 
 1. Install the CLI once: `npm install -g @railway/cli`
 2. Log in (opens browser): `railway login`
-3. From the project folder run: `./deploy.sh`  
-   Or: `railway init --name cscc-dashboard` then `railway up`
-4. Railway will print your live URL; or run `railway open` to open it.
+3. Link a project (once): `railway init --name cscc-dashboard`
+4. Deploy: `./deploy.sh` (or `railway up`)
+5. Railway will print your live URL; or run `railway open` to open it.
+
+**If you see `invalid peer certificate: UnknownIssuer` (Railway CLI):**
+
+This usually means your network (e.g. corporate proxy or VPN) is intercepting HTTPS, so the CLI can’t verify Railway’s certificate. **Use the GitHub + Railway dashboard flow instead** (no CLI on your machine):
+
+1. **Create a new repo on GitHub:** github.com → **New repository** → name it (e.g. `cscc-dashboard`) → **Create repository**. Do not add a README or .gitignore (you already have code).
+2. **Copy the repo URL** GitHub shows (e.g. `https://github.com/your-username/cscc-dashboard.git`).
+3. **In this project folder, add the remote and push** (use your actual URL from step 2):
+   ```bash
+   git remote remove origin   # only if you already added a wrong URL
+   git remote add origin https://github.com/YOUR_GITHUB_USERNAME/YOUR_REPO_NAME.git
+   git push -u origin main
+   ```
+   Replace `YOUR_GITHUB_USERNAME` and `YOUR_REPO_NAME` with your GitHub username and the repo name you created.
+4. Go to [railway.app](https://railway.app) and sign in with GitHub.
+5. **New Project** → **Deploy from GitHub repo** → choose your repo.
+6. Railway will detect the `Procfile` and deploy. In the project: **Settings** → **Networking** → **Generate domain** to get your dashboard URL.
+
+Same result as the CLI; only the connection to Railway goes through the browser instead of the terminal.
 
 ---
 
@@ -112,12 +131,13 @@ If you don’t need “Generate email” or “Latest news” on the server:
 
 ## API keys (for AI features)
 
-- **OPENAI_API_KEY** – Required for “Generate email”. Create an API key in the [OpenAI dashboard](https://platform.openai.com/api-keys).
-- **GEMINI_API_KEY** – Optional; used for “Latest news” via **Gemini + Google Search grounding**. Get a key at [Google AI Studio](https://aistudio.google.com/apikey). Install the SDK: `pip install google-genai`. When set, the news button uses Gemini first; falls back to News API or Serper if Gemini is unavailable.
-- **NEWS_API_KEY** – Optional; fallback for “Latest news”. Free tier at [newsapi.org](https://newsapi.org/). Set in the environment on the server where Flask runs.
-- **SERPER_API_KEY** – Optional; alternative fallback for “Latest news” (Google search via [serper.dev](https://serper.dev)). Set in the environment; see [app.py](app.py).
+- **OPENAI_API_KEY** – Powers **both** “Generate email” and “Latest news”. Create an API key in the [OpenAI dashboard](https://platform.openai.com/api-keys). When set, email uses it for reach-out text and news uses it for a summary about the merchant (no separate news API needed).  
+  **Where to set:** Railway → your project → **Variables** → Add variable `OPENAI_API_KEY` = your key (exact name). After adding or changing variables, **trigger a redeploy** (e.g. Deployments → ⋮ → Redeploy) so the app sees the new value. Never commit the key to git.
+- **GEMINI_API_KEY** – Optional; “Latest news” can use **Gemini + Google Search** instead of (or after) OpenAI. Get a key at [Google AI Studio](https://aistudio.google.com/apikey). When set and OpenAI is not set, the news button uses Gemini.
+- **NEWS_API_KEY** – Optional; fallback for “Latest news”. Free tier at [newsapi.org](https://newsapi.org/).
+- **SERPER_API_KEY** – Optional; alternative fallback for “Latest news” (Google search via [serper.dev](https://serper.dev)).
 
-If keys are not set, the dashboard still loads; the email and news buttons will return a clear error asking for the relevant key or for the Flask server to be running.
+If no keys are set, the dashboard still loads; the email and news buttons show a “not configured” message.
 
 ---
 

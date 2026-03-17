@@ -5,10 +5,10 @@ Serves the dashboard and provides AI-backed API endpoints:
   - GET  /api/news?merchant=... — fetch latest news about the merchant
 
 Set environment variables:
-  OPENAI_API_KEY — required for email generation
-  GEMINI_API_KEY — optional; for "Latest news" via Gemini + Google Search grounding (preferred)
-  NEWS_API_KEY   — optional; from https://newsapi.org/ (free tier) for news
-  SERPER_API_KEY — optional; from https://serper.dev for news if Gemini unused
+  OPENAI_API_KEY — used for both "Generate email" and "Latest news" (one key for both)
+  GEMINI_API_KEY — optional; alternative for "Latest news" (Gemini + Google Search)
+  NEWS_API_KEY   — optional; fallback for "Latest news"
+  SERPER_API_KEY — optional; fallback for "Latest news"
 
 Run: flask run --host=0.0.0.0  (or: python app.py)
 Then open http://<this-machine-ip>:5000 for team access.
@@ -39,7 +39,7 @@ def get_openai_client():
 
 # User-facing messages when deployed without API keys (no env vars set)
 MSG_EMAIL_NOT_CONFIGURED = "Email generation is not configured for this deployment. Add OPENAI_API_KEY to enable it."
-MSG_NEWS_NOT_CONFIGURED = "Latest news is not configured for this deployment. Add GEMINI_API_KEY, NEWS_API_KEY, or SERPER_API_KEY to enable it."
+MSG_NEWS_NOT_CONFIGURED = "Latest news is not configured for this deployment. Add OPENAI_API_KEY (or GEMINI_API_KEY, NEWS_API_KEY, SERPER_API_KEY) in Railway Variables and redeploy."
 
 
 def generate_email_via_openai(payload):
@@ -77,6 +77,32 @@ Write one concise email (3–5 sentences): friendly, specific to their planning 
         )
         text = (resp.choices[0].message.content or "").strip()
         return text, None
+    except Exception as e:
+        return None, str(e)
+
+
+def fetch_news_openai(merchant_name: str, limit: int = 8):
+    """
+    Use OpenAI to summarize news/developments about the merchant.
+    Returns (summary_text, None) or (None, error). No article links (model knowledge only).
+    """
+    client = get_openai_client()
+    if not client:
+        return None, MSG_NEWS_NOT_CONFIGURED
+
+    prompt = (
+        f"Summarize the latest news and notable recent developments about the company or brand: {merchant_name}. "
+        f"Give a short paragraph (2–4 sentences) plus up to {limit} bullet points with specific facts, product launches, partnerships, or business news if you know any. "
+        "If you don't have recent news, provide useful context about the company. Be concise and factual."
+    )
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=500,
+        )
+        summary = (resp.choices[0].message.content or "").strip()
+        return summary, None
     except Exception as e:
         return None, str(e)
 
@@ -236,9 +262,17 @@ def api_news():
     if not merchant:
         return jsonify({"error": "Missing merchant query"}), 400
     limit = min(15, max(1, int(request.args.get("limit", 8))))
+    has_openai = bool(os.environ.get("OPENAI_API_KEY"))
     use_gemini = request.args.get("source", "").lower() == "gemini" or bool(os.environ.get("GEMINI_API_KEY"))
 
-    # Prefer Gemini (Google Search grounding) if key is set; then News API; then Serper
+    # Prefer OpenAI for news when OPENAI_API_KEY is set (same key as email); then Gemini; then News API; then Serper
+    if has_openai:
+        summary, err = fetch_news_openai(merchant, limit)
+        if not err:
+            return jsonify({"merchant": merchant, "articles": [], "summary": summary or ""})
+        if err != MSG_NEWS_NOT_CONFIGURED:
+            return jsonify({"error": err}), 500
+
     if use_gemini:
         items, summary, err = fetch_news_gemini(merchant, limit)
         if err:

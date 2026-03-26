@@ -225,11 +225,6 @@ def next_action_for_priority(priority: str):
         return "Schedule planning touchpoint"
     return "Monitor"
 
-# Managed merchants sheet layout: 0=Account (merchant), 1=CSM, 2=FY26 FC GMV
-CSM_COLUMN_INDEX = 1
-GMV_COLUMN_INDEX = 2
-
-
 def format_fy26_gmv(value) -> str:
     """Format FY26 FC GMV for display (currency or pass-through string)."""
     if value is None:
@@ -245,42 +240,76 @@ def format_fy26_gmv(value) -> str:
     return s
 
 
-def read_merchants_from_xlsx(path: str) -> tuple[list[str], dict[str, str], dict[str, str]]:
+def _column_indices_from_header(header_row: tuple) -> tuple[int, int, int | None, int | None]:
+    """Map Account, CSM, GMV, Legal entity columns from first header row."""
+    hdr = [str(c).strip().lower() if c is not None else "" for c in header_row]
+    account_i = 0
+    csm_i = 1
+    gmv_i = 2
+    legal_i = None
+    for i, h in enumerate(hdr):
+        if not h:
+            continue
+        if "account" in h or h == "merchant" or "merchant name" in h:
+            account_i = i
+        if h == "csm" or "owner" in h:
+            csm_i = i
+        if "fy26" in h or ("gmv" in h and "legal" not in h):
+            gmv_i = i
+        if ("legal" in h and "gmv" not in h) or h in ("legal entity", "entity", "legal name", "corporate name"):
+            legal_i = i
+    return account_i, csm_i, gmv_i, legal_i
+
+
+def read_merchants_from_xlsx(path: str) -> tuple[list[str], dict[str, str], dict[str, str], dict[str, str]]:
     """
-    Returns (merchant_names, merchant_to_owner_map, merchant_to_fy26_gmv).
-    CSM from column 1; FY26 FC GMV from column 2 when present.
+    Returns (merchant_names, merchant_to_owner, merchant_to_fy26_gmv, merchant_to_legal_entity).
+    Row 1 = headers; data from row 2. Skips header-like account names.
     """
     wb = load_workbook(path, data_only=True)
     ws = wb[wb.sheetnames[0]]
+    header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
+    account_i, csm_i, gmv_i, legal_i = _column_indices_from_header(header_row)
 
     names = []
     seen = set()
     merchant_to_owner: dict[str, str] = {}
     merchant_to_gmv: dict[str, str] = {}
+    merchant_to_legal: dict[str, str] = {}
 
-    for row in ws.iter_rows(values_only=True):
-        value = row[0]
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or account_i >= len(row):
+            continue
+        value = row[account_i]
         if value is None:
             continue
         name = normalize_name(value)
-        if not name or name.lower() == "all merchants" or name.lower() == "new merchants":
+        if not name or name.lower() in ("all merchants", "new merchants"):
+            continue
+        if name.lower() in ("account", "merchant", "merchant name", "name"):
             continue
         if name not in seen:
             seen.add(name)
             names.append(name)
-            csm = row[CSM_COLUMN_INDEX] if len(row) > CSM_COLUMN_INDEX else None
+            csm = row[csm_i] if len(row) > csm_i else None
             merchant_to_owner[name] = normalize_name(str(csm)) if csm is not None and str(csm).strip() else ""
-            gmv_raw = row[GMV_COLUMN_INDEX] if len(row) > GMV_COLUMN_INDEX else None
+            gmv_raw = row[gmv_i] if gmv_i is not None and len(row) > gmv_i else None
             merchant_to_gmv[name] = format_fy26_gmv(gmv_raw) if gmv_raw is not None and str(gmv_raw).strip() != "" else ""
-    return names, merchant_to_owner, merchant_to_gmv
+            leg = None
+            if legal_i is not None and len(row) > legal_i:
+                leg = row[legal_i]
+            merchant_to_legal[name] = normalize_name(str(leg)) if leg is not None and str(leg).strip() else ""
+    return names, merchant_to_owner, merchant_to_gmv, merchant_to_legal
 
 
 def build_rows(
     merchant_names: list[str],
     merchant_to_owner: dict[str, str],
     merchant_to_gmv: dict[str, str] | None = None,
+    merchant_to_legal: dict[str, str] | None = None,
 ):
     gmv_map = merchant_to_gmv or {}
+    legal_map = merchant_to_legal or {}
     rows = []
     for merchant in merchant_names:
         vertical, tier, seasonality_codes = infer_vertical_and_seasonality(merchant)
@@ -324,6 +353,7 @@ def build_rows(
                 "priority": priority,
                 "owner": merchant_to_owner.get(merchant, ""),
                 "fy26_fc_gmv": gmv_map.get(merchant, ""),
+                "legal_entity": legal_map.get(merchant, ""),
                 "status": "Planned",
                 "next_action": next_action_for_priority(priority),
                 "leadership_flag": leadership_flag(tier, priority),
@@ -334,8 +364,8 @@ def build_rows(
     return rows
 
 def main():
-    merchant_names, merchant_to_owner, merchant_to_gmv = read_merchants_from_xlsx(INPUT_FILE)
-    rows = build_rows(merchant_names, merchant_to_owner, merchant_to_gmv)
+    merchant_names, merchant_to_owner, merchant_to_gmv, merchant_to_legal = read_merchants_from_xlsx(INPUT_FILE)
+    rows = build_rows(merchant_names, merchant_to_owner, merchant_to_gmv, merchant_to_legal)
 
     fieldnames = [
         "merchant",
@@ -350,6 +380,7 @@ def main():
         "priority",
         "owner",
         "fy26_fc_gmv",
+        "legal_entity",
         "status",
         "next_action",
         "leadership_flag",

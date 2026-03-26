@@ -105,8 +105,9 @@ Deploy the Flask app so it’s reachable via a public URL (you can still restric
 1. **Prepare**
    - Ensure `dashboard.html` is generated and committed (or generated in the deploy step).
    - In the cloud dashboard, set:
-     - `OPENAI_API_KEY`
-     - `NEWS_API_KEY` and/or `SERPER_API_KEY` (optional)
+     - `OPENAI_API_KEY` (email)
+     - `GEMINI_API_KEY` (recommended for live “Latest news”)
+     - `NEWS_API_KEY` and/or `SERPER_API_KEY` (optional fallbacks)
 
 2. **Example: Railway / Render**
    - Connect the repo; set build command to `pip install -r requirements.txt` and run `python build_dashboard.py` if you generate the HTML at deploy time.
@@ -188,9 +189,9 @@ The dashboard adds columns **Apps**, **Approval %**, **Take rate %**, **Loans**,
 
 ## API keys (for AI features)
 
-- **OPENAI_API_KEY** – Powers **both** “Generate email” and “Latest news”. Create an API key in the [OpenAI dashboard](https://platform.openai.com/api-keys). When set, email uses it for reach-out text and news uses it for a summary about the merchant (no separate news API needed).  
+- **OPENAI_API_KEY** – Powers **“Generate email”** and **“Latest news”** when other news backends are unavailable or empty. **Latest news** uses the **Responses API** with the **`web_search`** tool (live web + URL citations), not plain Chat Completions. Optional: **`OPENAI_NEWS_MODEL`** (default `gpt-4o`). Create a key in the [OpenAI dashboard](https://platform.openai.com/api-keys).  
   **Where to set:** Railway → your project → **Variables** → Add variable `OPENAI_API_KEY` = your key (exact name). After adding or changing variables, **trigger a redeploy** (e.g. Deployments → ⋮ → Redeploy) so the app sees the new value. Never commit the key to git.
-- **GEMINI_API_KEY** – Optional; “Latest news” can use **Gemini + Google Search** instead of (or after) OpenAI. Get a key at [Google AI Studio](https://aistudio.google.com/apikey). When set and OpenAI is not set, the news button uses Gemini.
+- **GEMINI_API_KEY** – **Recommended for “Latest news”:** the app tries **Gemini + Google Search** first when this key is set, so results are grounded in **current** web sources. Get a key at [Google AI Studio](https://aistudio.google.com/apikey).
 - **NEWS_API_KEY** – Optional; fallback for “Latest news”. Free tier at [newsapi.org](https://newsapi.org/).
 - **SERPER_API_KEY** – Optional; alternative fallback for “Latest news” (Google search via [serper.dev](https://serper.dev)).
 
@@ -202,6 +203,6 @@ If no keys are set, the dashboard still loads; the email and news buttons show a
 
 - [ ] Run `python build_dashboard.py` to create `dashboard.html`.
 - [ ] Run the Flask app with `flask run --host=0.0.0.0` (or deploy to a cloud host).
-- [ ] Set `OPENAI_API_KEY` (and optionally news keys) where the app runs.
+- [ ] Set `OPENAI_API_KEY` for email; set `GEMINI_API_KEY` (and optionally `SERPER_API_KEY` / `NEWS_API_KEY`) for up-to-date news.
 - [ ] Share the URL (e.g. `http://<internal-server>:5000` or your cloud URL).
 - [ ] (Optional) Add auth or put the app behind company SSO for access control.

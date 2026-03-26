@@ -22,8 +22,8 @@ def main():
         rows = _load_from_csv_fallback()
     else:
         from CSCC import read_merchants_from_xlsx, build_rows
-        merchant_names, merchant_to_owner, merchant_to_gmv = read_merchants_from_xlsx(excel_path)
-        rows = build_rows(merchant_names, merchant_to_owner, merchant_to_gmv)
+        merchant_names, merchant_to_owner, merchant_to_gmv, merchant_to_legal = read_merchants_from_xlsx(excel_path)
+        rows = build_rows(merchant_names, merchant_to_owner, merchant_to_gmv, merchant_to_legal)
 
     try:
         from snowflake_kpis import attach_kpis_to_rows
@@ -242,6 +242,13 @@ def build_html(data_json: str) -> str:
     .news-list a:hover {{ text-decoration: underline; }}
     .news-list .source {{ font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem; }}
     .news-summary {{ margin: 0 0 1rem; padding: 0.75rem; background: var(--bg); border-radius: 8px; font-size: 0.9rem; }}
+    .news-summary.markdown-body h3 {{ margin: 1rem 0 0.5rem; font-size: 1rem; color: var(--text); }}
+    .news-summary.markdown-body h3:first-child {{ margin-top: 0; }}
+    .news-summary.markdown-body ul {{ margin: 0.35rem 0 0.75rem 1.1rem; padding: 0; }}
+    .news-summary.markdown-body li {{ margin-bottom: 0.35rem; }}
+    .news-summary.markdown-body p {{ margin: 0 0 0.65rem; }}
+    .news-summary.markdown-body strong {{ color: var(--text); }}
+    .news-source-tag {{ font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.75rem; }}
     .api-error {{ color: var(--critical); }}
   </style>
 </head>
@@ -334,6 +341,7 @@ def build_html(data_json: str) -> str:
       <div class="modal-body" id="modal-news-body"></div>
     </div>
   </div>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script>
     let RAW = {data_escaped};
     const COLS = ['merchant','vertical','tier','peak_months','engagement_month_label','engagement_type','priority','owner','status','next_action','leadership_flag','playbook'];
@@ -393,7 +401,7 @@ def build_html(data_json: str) -> str:
         if (f.owner && r.owner !== f.owner) return false;
         if (f.month && r.engagement_month_label !== f.month) return false;
         if (f.q) {{
-          const s = [r.merchant, r.vertical, r.owner, r.fy26_fc_gmv, r.playbook, r.next_action, r.num_applications, r.approval_rate, r.take_rate, r.loans, r.aov].join(' ').toLowerCase();
+          const s = [r.merchant, r.legal_entity, r.vertical, r.owner, r.fy26_fc_gmv, r.playbook, r.next_action, r.num_applications, r.approval_rate, r.take_rate, r.loans, r.aov].join(' ').toLowerCase();
           if (!s.includes(f.q)) return false;
         }}
         return true;
@@ -529,7 +537,10 @@ def build_html(data_json: str) -> str:
       openNewsModal('Latest news – ' + merchant, '<div class="modal-body loading">Fetching news…</div>');
       const body = document.getElementById('modal-news-body');
       try {{
-        const res = await fetch(apiUrl('/api/news?merchant=' + encodeURIComponent(merchant)));
+        const params = new URLSearchParams({{ merchant }});
+        const le = (row.legal_entity && String(row.legal_entity).trim()) ? String(row.legal_entity).trim() : '';
+        if (le) params.set('legal_entity', le);
+        const res = await fetch(apiUrl('/api/news?' + params.toString()));
         const data = await res.json().catch(() => ({{}}));
         if (!res.ok) {{
           body.innerHTML = '<p class="api-error">' + escape(data.error || 'Request failed') + '</p>';
@@ -539,14 +550,23 @@ def build_html(data_json: str) -> str:
         }}
         const articles = data.articles || [];
         const summary = data.summary || '';
+        const src = data.source || '';
         if (articles.length === 0 && !summary) {{
-          body.innerHTML = '<p class="text-muted">No recent news returned. Set OPENAI_API_KEY (or other news APIs) in your server environment and redeploy.</p>';
+          body.innerHTML = '<p class="text-muted">No recent news returned. Set GEMINI_API_KEY (live web), or SERPER_API_KEY / NEWS_API_KEY, in your server environment. OpenAI alone does not browse current news.</p>';
           btn.disabled = false;
           btn.textContent = 'Latest news';
           return;
         }}
         let html = '';
-        if (summary) html += '<p class="news-summary">' + escape(summary) + '</p>';
+        if (src) {{
+          const labels = {{ gemini: 'Gemini + Google Search (live web)', serper: 'Serper (Google News)', newsapi: 'News API', openai: 'OpenAI Responses API + web search (live)' }};
+          html += '<p class="news-source-tag">' + escape(labels[src] || src) + '</p>';
+        }}
+        if (summary) {{
+          const useMd = (typeof marked !== 'undefined' && (summary.indexOf('###') >= 0 || summary.indexOf('**') >= 0));
+          const inner = useMd ? marked.parse(summary) : '<p>' + escape(summary).replace(/\\n/g, '<br>') + '</p>';
+          html += '<div class="news-summary markdown-body">' + inner + '</div>';
+        }}
         if (articles.length) html += '<ul class="news-list">' + articles.map(a => '<li><a href="' + escape(a.url) + '" target="_blank" rel="noopener">' + escape(a.title) + '</a><div class="source">' + escape(a.source) + (a.published ? ' · ' + escape(a.published.slice(0,10)) : '') + '</div></li>').join('') + '</ul>';
         body.innerHTML = html || '<p class="text-muted">No sources returned.</p>';
         btn.disabled = false;

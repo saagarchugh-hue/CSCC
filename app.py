@@ -6,6 +6,7 @@ Serves the dashboard and provides AI-backed API endpoints:
 
 Set environment variables:
   OPENAI_API_KEY — used for both "Generate email" and "Latest news" (one key for both)
+  OPENAI_NEWS_MODEL — optional; model for news via Responses API + web_search (default: gpt-4o)
   GEMINI_API_KEY — optional; alternative for "Latest news" (Gemini + Google Search)
   NEWS_API_KEY   — optional; fallback for "Latest news"
   SERPER_API_KEY — optional; fallback for "Latest news"
@@ -48,7 +49,8 @@ def normalize_name(name: str) -> str:
 
 def read_merchants_from_google_sheet(sheet_id: str, gid: str = "0"):
     """
-    Fetch a published Google Sheet as CSV and return (merchant_names, merchant_to_owner, merchant_to_gmv, error).
+    Fetch a published Google Sheet as CSV and return
+    (merchant_names, merchant_to_owner, merchant_to_gmv, merchant_to_legal, error).
     Expects columns like: Account, CSM, FY26 FC GMV (headers detected flexibly).
     """
     from CSCC import format_fy26_gmv
@@ -59,13 +61,13 @@ def read_merchants_from_google_sheet(sheet_id: str, gid: str = "0"):
         with urllib.request.urlopen(req, timeout=15) as r:
             raw = r.read().decode("utf-8", errors="replace")
     except Exception as e:
-        return None, None, None, str(e)
+        return None, None, None, None, str(e)
     if "Sign in" in raw or "sign in" in raw:
-        return None, None, None, "Sheet is private. Publish to web: File → Share → Publish to web → choose this sheet → CSV."
+        return None, None, None, None, "Sheet is private. Publish to web: File → Share → Publish to web → choose this sheet → CSV."
     reader = csv.reader(io.StringIO(raw))
     rows = list(reader)
     if not rows:
-        return None, None, None, "Sheet is empty."
+        return None, None, None, None, "Sheet is empty."
     headers = [normalize_name(h) for h in rows[0]]
     name_col = 0
     owner_col = 1
@@ -84,11 +86,21 @@ def read_merchants_from_google_sheet(sheet_id: str, gid: str = "0"):
     seen = set()
     merchant_to_owner = {}
     merchant_to_gmv = {}
+    merchant_to_legal = {}
+    legal_col = None
+    for i, h in enumerate(headers):
+        if not h:
+            continue
+        hl = h.lower()
+        if ("legal" in hl and "gmv" not in hl) or hl in ("entity", "legal entity", "legal name"):
+            legal_col = i
     for row in rows[1:]:
         if name_col >= len(row):
             continue
         name = normalize_name(row[name_col])
         if not name or name.lower() in ("all merchants", "new merchants"):
+            continue
+        if name.lower() in ("account", "merchant", "name"):
             continue
         if name not in seen:
             seen.add(name)
@@ -99,7 +111,9 @@ def read_merchants_from_google_sheet(sheet_id: str, gid: str = "0"):
             merchant_to_gmv[name] = (
                 format_fy26_gmv(gmv_raw) if gmv_raw is not None and str(gmv_raw).strip() != "" else ""
             )
-    return names, merchant_to_owner, merchant_to_gmv, None
+            leg = row[legal_col] if legal_col is not None and legal_col < len(row) else None
+            merchant_to_legal[name] = normalize_name(str(leg)) if leg is not None and str(leg).strip() else ""
+    return names, merchant_to_owner, merchant_to_gmv, merchant_to_legal, None
 
 
 # User-facing messages when deployed without API keys (no env vars set)
@@ -150,33 +164,135 @@ Write one concise email (3–5 sentences): friendly, specific to their planning 
         return None, str(e)
 
 
-def fetch_news_openai(merchant_name: str, limit: int = 8):
+def _openai_responses_text_and_citations(response, limit: int) -> tuple[str, list[dict]]:
+    """Extract main text and url_citation sources from a Responses API result."""
+    items: list[dict] = []
+    seen: set[str] = set()
+    text_parts: list[str] = []
+
+    out = getattr(response, "output", None) or []
+    for item in out:
+        if getattr(item, "type", None) != "message":
+            continue
+        for part in getattr(item, "content", None) or []:
+            ptype = getattr(part, "type", None)
+            if ptype != "output_text":
+                continue
+            chunk = getattr(part, "text", None) or ""
+            if chunk:
+                text_parts.append(chunk)
+            for ann in getattr(part, "annotations", None) or []:
+                atype = getattr(ann, "type", None)
+                if atype != "url_citation":
+                    continue
+                url = (getattr(ann, "url", None) or "").strip()
+                title = (getattr(ann, "title", None) or "").strip() or "Source"
+                if url and url not in seen:
+                    seen.add(url)
+                    items.append({
+                        "title": title,
+                        "url": url,
+                        "source": title,
+                        "published": "",
+                    })
+
+    merged = getattr(response, "output_text", None)
+    if merged and str(merged).strip():
+        summary = str(merged).strip()
+    else:
+        summary = "\n\n".join(text_parts).strip()
+
+    return summary, items[:limit]
+
+
+def fetch_news_openai(merchant_name: str, limit: int = 8, legal_entity: str = ""):
     """
-    Use OpenAI to summarize news/developments about the merchant.
-    Returns (summary_text, None) or (None, error). No article links (model knowledge only).
+    OpenAI **Responses API** with the built-in **web_search** tool (live web + citations).
+    Requires a recent `openai` Python package with `client.responses.create`.
+    Returns (articles, summary_text, None) or (None, None, error).
     """
     client = get_openai_client()
     if not client:
-        return None, MSG_NEWS_NOT_CONFIGURED
+        return None, None, MSG_NEWS_NOT_CONFIGURED
 
-    prompt = (
-        f"Summarize the latest news and notable recent developments about the company or brand: {merchant_name}. "
-        f"Give a short paragraph (2–4 sentences) plus up to {limit} bullet points with specific facts, product launches, partnerships, or business news if you know any. "
-        "If you don't have recent news, provide useful context about the company. Be concise and factual."
-    )
-    try:
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=500,
+    if not hasattr(client, "responses") or not hasattr(client.responses, "create"):
+        return None, None, (
+            "Your OpenAI SDK is too old for Responses API + web search. "
+            "Run: pip install -U 'openai>=1.55.0'"
         )
-        summary = (resp.choices[0].message.content or "").strip()
-        return summary, None
+
+    le = legal_entity.strip()
+    legal_block = (
+        f"Legal / corporate name provided: **{le}**. Use web search to confirm and disambiguate.\n"
+        if le
+        else "Infer the registered legal entity or parent company behind the consumer-facing brand when possible.\n"
+    )
+    prompt = f"""You are a commercial intelligence assistant for Affirm's merchant success team. **Use web search** for current, verifiable information (prioritize the last 12–24 months).
+
+**Merchant (operating brand):** {merchant_name}
+{legal_block}
+
+Answer in **Markdown** with these sections:
+
+### 1. Executive summary
+2–3 sentences on what matters most for this merchant right now for a BNPL partner.
+
+### 2. Legal entity & corporate context
+Parent company, legal name, public ticker if any (only if found via search).
+
+### 3. Recent news & developments
+Product, partnerships, leadership, funding, M&A, earnings, regulatory — with approximate dates where available.
+
+### 4. Competitive & industry landscape
+Competitors, category trends, external risks relevant to this merchant.
+
+### 5. Actionable next steps for the CSM
+4–6 **specific** bullets for what the CSM should do next with Affirm (timing, co-marketing, risk monitoring, education). Each bullet should be concrete.
+
+If search finds little on the exact brand, say so clearly and still give vertical-relevant actions. Do not invent facts; cite what you found on the web."""
+
+    model = os.environ.get("OPENAI_NEWS_MODEL", "gpt-4o").strip() or "gpt-4o"
+    tools = [{"type": "web_search", "external_web_access": True}]
+
+    def _call(tool_choice):
+        return client.responses.create(
+            model=model,
+            input=prompt,
+            tools=tools,
+            tool_choice=tool_choice,
+            max_output_tokens=4096,
+        )
+
+    try:
+        try:
+            resp = _call("required")
+        except Exception as first:
+            # Some accounts/models reject forced tools; retry with auto
+            err_s = str(first).lower()
+            if "tool" in err_s or "required" in err_s or "unsupported" in err_s:
+                resp = _call("auto")
+            else:
+                raise
+
+        summary, items = _openai_responses_text_and_citations(resp, limit)
+        if not summary:
+            return None, None, "OpenAI returned an empty response. Try a different OPENAI_NEWS_MODEL or check API errors."
+        return items, summary, None
     except Exception as e:
-        return None, str(e)
+        return None, None, str(e)
 
 
-def fetch_news_newsapi(merchant_name: str, limit: int = 8):
+def _news_search_query(merchant_name: str, legal_entity: str = "") -> str:
+    """Build a web-oriented search query (recent news + industry context)."""
+    parts = [merchant_name, "news", "2024", "2025"]
+    if legal_entity.strip():
+        parts.insert(1, legal_entity.strip())
+    else:
+        parts.extend(["company", "industry", "competitors"])
+    return " ".join(parts)
+
+
+def fetch_news_newsapi(merchant_name: str, limit: int = 8, legal_entity: str = ""):
     """Fetch recent news using News API (newsapi.org)."""
     key = os.environ.get("NEWS_API_KEY")
     if not key:
@@ -184,7 +300,7 @@ def fetch_news_newsapi(merchant_name: str, limit: int = 8):
 
     import urllib.parse
     import urllib.request
-    q = urllib.parse.quote_plus(merchant_name)
+    q = urllib.parse.quote_plus(_news_search_query(merchant_name, legal_entity))
     url = f"https://newsapi.org/v2/everything?q={q}&language=en&sortBy=publishedAt&pageSize={limit}&apiKey={key}"
     try:
         with urllib.request.urlopen(url, timeout=10) as r:
@@ -206,16 +322,17 @@ def fetch_news_newsapi(merchant_name: str, limit: int = 8):
     return items, None
 
 
-def fetch_news_serper(merchant_name: str, limit: int = 8):
+def fetch_news_serper(merchant_name: str, limit: int = 8, legal_entity: str = ""):
     """Fetch news/search results using Serper (serper.dev)."""
     key = os.environ.get("SERPER_API_KEY")
     if not key:
         return None, "SERPER_API_KEY not set."
 
     import urllib.request
+    q = _news_search_query(merchant_name, legal_entity)
     req = urllib.request.Request(
         "https://google.serper.dev/news",
-        data=json.dumps({"q": f"{merchant_name} company news", "num": limit}).encode(),
+        data=json.dumps({"q": q, "num": limit}).encode(),
         headers={"X-API-KEY": key, "Content-Type": "application/json"},
         method="POST",
     )
@@ -238,9 +355,9 @@ def fetch_news_serper(merchant_name: str, limit: int = 8):
     return items, None
 
 
-def fetch_news_gemini(merchant_name: str, limit: int = 8):
+def fetch_news_gemini(merchant_name: str, limit: int = 8, legal_entity: str = ""):
     """
-    Fetch latest news about the merchant using Gemini with Google Search grounding.
+    Live web: Gemini + Google Search grounding (preferred for current news).
     Returns (list of {title, url, source}, summary_text) or (None, error).
     """
     key = os.environ.get("GEMINI_API_KEY")
@@ -256,14 +373,41 @@ def fetch_news_gemini(merchant_name: str, limit: int = 8):
     client = genai.Client(api_key=key)
     grounding_tool = types.Tool(google_search=types.GoogleSearch())
     config = types.GenerateContentConfig(tools=[grounding_tool])
-    prompt = (
-        f"List the latest news and recent developments about the company or brand: {merchant_name}. "
-        f"Return a brief summary (2–3 sentences) and then list up to {limit} specific recent news items "
-        "with clear titles and sources. Focus on business, product, or partnership news."
+    le = legal_entity.strip()
+    legal_block = (
+        f"The user provided legal / corporate name: **{le}**. Use search to confirm or refine.\n"
+        if le
+        else "Use Google Search to infer the registered legal entity / parent company behind the storefront brand when possible.\n"
     )
+    prompt = f"""You are a commercial intelligence assistant for Affirm’s merchant success team. **Use Google Search** for CURRENT, verifiable information (prioritize the last 12–24 months).
+
+**Merchant (operating brand):** {merchant_name}
+{legal_block}
+
+Produce a structured answer in **Markdown** with these sections:
+
+### 1. Executive summary
+2–3 sentences on what matters most for this merchant *right now* for a BNPL partner.
+
+### 2. Legal entity & corporate context
+Parent company, legal name, public ticker if any, and relationship to the consumer-facing brand (only if found in search).
+
+### 3. Recent news & developments
+Product, partnerships, leadership, funding, M&A, earnings, regulatory — with approximate dates where available.
+
+### 4. Competitive & industry landscape
+Main competitors, category trends, and external risks (regulatory, macro, reputation) that could affect the merchant or financing programs.
+
+### 5. Actionable next steps for the CSM
+4–6 **specific** bullets: what the CSM should do next with Affirm (e.g. promo timing, co-marketing, risk monitoring, merchant education). Each bullet should be concrete and justified by context above.
+
+If search finds little on the exact brand, say so clearly and still give vertical-relevant actions. Do not invent facts; distinguish search-supported facts from general industry practice.
+
+After your Markdown report, on its own line, list up to {limit} **source titles** you relied on from search (for citation transparency).
+"""
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model=os.environ.get("GEMINI_NEWS_MODEL", "gemini-2.0-flash"),
             contents=prompt,
             config=config,
         )
@@ -323,11 +467,11 @@ def get_dashboard_data():
     sheet_id = os.environ.get("GOOGLE_SHEET_ID", "").strip()
     if sheet_id:
         gid = os.environ.get("GOOGLE_SHEET_GID", "0").strip() or "0"
-        names, merchant_to_owner, merchant_to_gmv, err = read_merchants_from_google_sheet(sheet_id, gid)
+        names, merchant_to_owner, merchant_to_gmv, merchant_to_legal, err = read_merchants_from_google_sheet(sheet_id, gid)
         if err:
             raise ValueError(err)
         from CSCC import build_rows
-        rows = build_rows(names, merchant_to_owner, merchant_to_gmv)
+        rows = build_rows(names, merchant_to_owner, merchant_to_gmv, merchant_to_legal)
     else:
         rows = _load_rows_from_csv_full()
         if not rows:
@@ -379,42 +523,59 @@ def api_generate_email():
 @app.route("/api/news")
 def api_news():
     merchant = request.args.get("merchant", "").strip()
+    legal_entity = request.args.get("legal_entity", "").strip()
     if not merchant:
         return jsonify({"error": "Missing merchant query"}), 400
     limit = min(15, max(1, int(request.args.get("limit", 8))))
-    has_openai = bool(os.environ.get("OPENAI_API_KEY"))
-    use_gemini = request.args.get("source", "").lower() == "gemini" or bool(os.environ.get("GEMINI_API_KEY"))
+    force = request.args.get("source", "").lower()
 
-    # Prefer OpenAI for news when OPENAI_API_KEY is set (same key as email); then Gemini; then News API; then Serper
-    if has_openai:
-        summary, err = fetch_news_openai(merchant, limit)
+    def respond(out: dict, source: str):
+        out["source"] = source
+        return jsonify(out)
+
+    # Forced OpenAI-only (debug: Responses API + web search)
+    if force == "openai" and os.environ.get("OPENAI_API_KEY"):
+        items, summary, err = fetch_news_openai(merchant, limit, legal_entity=legal_entity)
+        if err:
+            return jsonify({"error": err}), 500 if err != MSG_NEWS_NOT_CONFIGURED else 400
+        return respond(
+            {"merchant": merchant, "articles": items or [], "summary": summary or ""},
+            "openai",
+        )
+
+    # 1) Gemini + Google Search (live web — avoids stale ~2023 model knowledge)
+    if os.environ.get("GEMINI_API_KEY"):
+        items, summary, err = fetch_news_gemini(merchant, limit, legal_entity=legal_entity)
         if not err:
-            return jsonify({"merchant": merchant, "articles": [], "summary": summary or ""})
+            return respond(
+                {"merchant": merchant, "articles": items or [], "summary": summary or ""},
+                "gemini",
+            )
+        if err and "not set" not in err and "Install" not in err:
+            return jsonify({"error": err}), 500
+
+    # 2) Serper (Google News index)
+    items, err = fetch_news_serper(merchant, limit, legal_entity=legal_entity)
+    if not err and items:
+        return respond({"merchant": merchant, "articles": items, "summary": ""}, "serper")
+
+    # 3) News API
+    items, err = fetch_news_newsapi(merchant, limit, legal_entity=legal_entity)
+    if not err and items:
+        return respond({"merchant": merchant, "articles": items, "summary": ""}, "newsapi")
+
+    # 4) OpenAI Responses API + web_search (live web + citations)
+    if os.environ.get("OPENAI_API_KEY"):
+        items, summary, err = fetch_news_openai(merchant, limit, legal_entity=legal_entity)
+        if not err:
+            return respond(
+                {"merchant": merchant, "articles": items or [], "summary": summary or ""},
+                "openai",
+            )
         if err != MSG_NEWS_NOT_CONFIGURED:
             return jsonify({"error": err}), 500
 
-    if use_gemini:
-        items, summary, err = fetch_news_gemini(merchant, limit)
-        if err:
-            if "not set" in err or "Install" in err:
-                items, err = fetch_news_newsapi(merchant, limit)
-                if err and "not set" in err:
-                    items, err = fetch_news_serper(merchant, limit)
-                if err:
-                    return jsonify({"error": MSG_NEWS_NOT_CONFIGURED}), 400
-                return jsonify({"merchant": merchant, "articles": items})
-            return jsonify({"error": err}), 500
-        out = {"merchant": merchant, "articles": items}
-        if summary:
-            out["summary"] = summary
-        return jsonify(out)
-
-    items, err = fetch_news_newsapi(merchant, limit)
-    if err and "not set" in err:
-        items, err = fetch_news_serper(merchant, limit)
-    if err:
-        return jsonify({"error": MSG_NEWS_NOT_CONFIGURED}), 400
-    return jsonify({"merchant": merchant, "articles": items})
+    return jsonify({"error": MSG_NEWS_NOT_CONFIGURED}), 400
 
 
 if __name__ == "__main__":

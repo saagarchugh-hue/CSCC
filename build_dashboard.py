@@ -22,8 +22,14 @@ def main():
         rows = _load_from_csv_fallback()
     else:
         from CSCC import read_merchants_from_xlsx, build_rows
-        merchant_names, merchant_to_owner = read_merchants_from_xlsx(excel_path)
-        rows = build_rows(merchant_names, merchant_to_owner)
+        merchant_names, merchant_to_owner, merchant_to_gmv = read_merchants_from_xlsx(excel_path)
+        rows = build_rows(merchant_names, merchant_to_owner, merchant_to_gmv)
+
+    try:
+        from snowflake_kpis import attach_kpis_to_rows
+        rows = attach_kpis_to_rows(rows)
+    except Exception as e:
+        print(f"Snowflake KPIs skipped: {e}")
 
     data_json = json.dumps(rows, ensure_ascii=False)
     html = build_html(data_json)
@@ -292,11 +298,17 @@ def build_html(data_json: str) -> str:
           <th data-key="engagement_month_label">Engagement month <span class="sort-icon"></span></th>
           <th data-key="engagement_type">Engagement type <span class="sort-icon"></span></th>
           <th data-key="priority">Priority <span class="sort-icon"></span></th>
-          <th data-key="owner">Owner <span class="sort-icon"></span></th>
+          <th data-key="owner">CSM <span class="sort-icon"></span></th>
+          <th data-key="fy26_fc_gmv">FY26 FC GMV <span class="sort-icon"></span></th>
           <th data-key="status">Status <span class="sort-icon"></span></th>
           <th data-key="next_action">Next action <span class="sort-icon"></span></th>
           <th data-key="leadership_flag">Leadership <span class="sort-icon"></span></th>
           <th data-key="playbook">Playbook <span class="sort-icon"></span></th>
+          <th data-key="num_applications">Apps <span class="sort-icon"></span></th>
+          <th data-key="approval_rate">Approval % <span class="sort-icon"></span></th>
+          <th data-key="take_rate">Take rate % <span class="sort-icon"></span></th>
+          <th data-key="loans">Loans <span class="sort-icon"></span></th>
+          <th data-key="aov">AOV <span class="sort-icon"></span></th>
           <th class="no-sort">Actions</th>
         </tr>
       </thead>
@@ -323,7 +335,7 @@ def build_html(data_json: str) -> str:
     </div>
   </div>
   <script>
-    const RAW = {data_escaped};
+    let RAW = {data_escaped};
     const COLS = ['merchant','vertical','tier','peak_months','engagement_month_label','engagement_type','priority','owner','status','next_action','leadership_flag','playbook'];
 
     let data = RAW.slice();
@@ -335,6 +347,16 @@ def build_html(data_json: str) -> str:
     const emptyState = document.getElementById('empty-state');
     const statRows = document.getElementById('stat-rows');
     const statMerchants = document.getElementById('stat-merchants');
+
+    async function loadData() {{
+      try {{
+        const r = await fetch(apiUrl('/api/data'));
+        if (r.ok) {{
+          const d = await r.json();
+          if (Array.isArray(d) && d.length) {{ RAW = d; data = RAW.slice(); }}
+        }}
+      }} catch (e) {{}}
+    }}
 
     function unique(arr) {{ return [...new Set(arr)].filter(Boolean).sort(); }}
     function fillSelect(id, values, current) {{
@@ -371,7 +393,7 @@ def build_html(data_json: str) -> str:
         if (f.owner && r.owner !== f.owner) return false;
         if (f.month && r.engagement_month_label !== f.month) return false;
         if (f.q) {{
-          const s = [r.merchant, r.vertical, r.owner, r.playbook, r.next_action].join(' ').toLowerCase();
+          const s = [r.merchant, r.vertical, r.owner, r.fy26_fc_gmv, r.playbook, r.next_action, r.num_applications, r.approval_rate, r.take_rate, r.loans, r.aov].join(' ').toLowerCase();
           if (!s.includes(f.q)) return false;
         }}
         return true;
@@ -411,10 +433,16 @@ def build_html(data_json: str) -> str:
           <td>${{ escape(r.engagement_type) }}</td>
           <td class="priority-${{ escape(r.priority) }}">${{ escape(r.priority) }}</td>
           <td>${{ escape(r.owner) }}</td>
+          <td>${{ escape(r.fy26_fc_gmv) }}</td>
           <td>${{ escape(r.status) }}</td>
           <td>${{ escape(r.next_action) }}</td>
           <td class="${{ r.leadership_flag === 'Yes' ? 'leadership-yes' : '' }}">${{ escape(r.leadership_flag) }}</td>
           <td>${{ escape(r.playbook) }}</td>
+          <td>${{ escape(r.num_applications) }}</td>
+          <td>${{ escape(r.approval_rate) }}</td>
+          <td>${{ escape(r.take_rate) }}</td>
+          <td>${{ escape(r.loans) }}</td>
+          <td>${{ escape(r.aov) }}</td>
           <td><div class="btn-row">
             <button type="button" class="btn-action primary btn-email" data-idx="${{ idx }}">Generate email</button>
             <button type="button" class="btn-action btn-news" data-idx="${{ idx }}">Latest news</button>
@@ -530,31 +558,36 @@ def build_html(data_json: str) -> str:
       }}
     }}
 
-    document.querySelectorAll('th[data-key]').forEach(th => {{
-      th.addEventListener('click', () => {{
-        const key = th.getAttribute('data-key');
-        const sortCol = key === 'engagement_month_label' ? 'engagement_month_sort' : key;
-        if (sortKey === sortCol) sortDir = -sortDir;
-        else {{ sortKey = sortCol; sortDir = 1; }}
-        document.querySelectorAll('th[data-key]').forEach(h => h.classList.remove('sorted-asc','sorted-desc'));
-        th.classList.add(sortDir === 1 ? 'sorted-asc' : 'sorted-desc');
-        render();
+    (async function() {{
+      await loadData();
+      data = RAW.slice();
+
+      document.querySelectorAll('th[data-key]').forEach(th => {{
+        th.addEventListener('click', () => {{
+          const key = th.getAttribute('data-key');
+          const sortCol = key === 'engagement_month_label' ? 'engagement_month_sort' : key;
+          if (sortKey === sortCol) sortDir = -sortDir;
+          else {{ sortKey = sortCol; sortDir = 1; }}
+          document.querySelectorAll('th[data-key]').forEach(h => h.classList.remove('sorted-asc','sorted-desc'));
+          th.classList.add(sortDir === 1 ? 'sorted-asc' : 'sorted-desc');
+          render();
+        }});
       }});
-    }});
-    document.querySelector('th[data-key="engagement_month_label"]').classList.add('sorted-asc');
+      document.querySelector('th[data-key="engagement_month_label"]').classList.add('sorted-asc');
 
-    document.getElementById('search').addEventListener('input', render);
-    document.getElementById('filter-vertical').addEventListener('change', render);
-    document.getElementById('filter-tier').addEventListener('change', render);
-    document.getElementById('filter-priority').addEventListener('change', render);
-    document.getElementById('filter-owner').addEventListener('change', render);
-    document.getElementById('filter-month').addEventListener('change', render);
+      document.getElementById('search').addEventListener('input', render);
+      document.getElementById('filter-vertical').addEventListener('change', render);
+      document.getElementById('filter-tier').addEventListener('change', render);
+      document.getElementById('filter-priority').addEventListener('change', render);
+      document.getElementById('filter-owner').addEventListener('change', render);
+      document.getElementById('filter-month').addEventListener('change', render);
 
-    fillSelect('filter-vertical', unique(RAW.map(r => r.vertical)));
-    fillSelect('filter-owner', unique(RAW.map(r => r.owner)));
-    fillSelect('filter-month', unique(RAW.map(r => r.engagement_month_label)));
+      fillSelect('filter-vertical', unique(RAW.map(r => r.vertical)));
+      fillSelect('filter-owner', unique(RAW.map(r => r.owner)));
+      fillSelect('filter-month', unique(RAW.map(r => r.engagement_month_label)));
 
-    render();
+      render();
+    }})();
   </script>
 </body>
 </html>

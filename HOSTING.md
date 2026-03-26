@@ -129,6 +129,63 @@ If you don’t need “Generate email” or “Latest news” on the server:
 
 ---
 
+## Live data from a Google Sheet
+
+The dashboard can load merchant data from a **published** Google Sheet instead of the embedded snapshot. When you set the variables below, the app fetches the sheet on each page load and builds the table from it.
+
+**1. Publish the sheet to web (required)**
+
+- Open your Google Sheet (e.g. [this one](https://docs.google.com/spreadsheets/d/1Hnn57sIcoLuotdJrXkx5TLxT1efCWFx_s_CJFtsKeKo/edit?gid=943969620#gid=943969620)).
+- **File** → **Share** → **Publish to web** (or **File** → **Share** → **Publish to web**).
+- Choose the correct **sheet/tab** (e.g. the one with gid `943969620`).
+- Set format to **Comma-separated values (.csv)** → **Publish**.  
+  Anyone with the link can view the CSV; the dashboard only reads it, it does not edit.
+
+**2. Set environment variables**
+
+From the sheet URL  
+`https://docs.google.com/spreadsheets/d/ **SHEET_ID** /edit?gid= **GID**`  
+use:
+
+- **GOOGLE_SHEET_ID** = `1Hnn57sIcoLuotdJrXkx5TLxT1efCWFx_s_CJFtsKeKo` (the long id after `/d/`).
+- **GOOGLE_SHEET_GID** = `943969620` (the number after `gid=`). Omit or set to `0` to use the first sheet.
+
+Example (Railway): **Variables** → add `GOOGLE_SHEET_ID` and `GOOGLE_SHEET_GID` → redeploy.
+
+**3. Sheet format**
+
+- First row = headers. The app looks for **Account** / merchant / name, **CSM** (or Owner), and optionally **FY26 FC GMV** (or any header containing `gmv`, `fy26`, or `fc gmv`).
+- Same idea as the Excel managed-merchants file: one row per merchant; **FY26 FC GMV** is shown on the dashboard and used in generated emails when present.
+
+If the sheet is private or not published, the dashboard falls back to the data embedded in `dashboard.html` (from the last time you ran `python build_dashboard.py`).
+
+---
+
+## Snowflake: loan / application KPIs (apps, approval %, take rate, loans, AOV)
+
+**Cursor’s Snowflake MCP** only helps *you* query Snowflake from the editor. The **hosted dashboard** does **not** use MCP; it runs SQL via `snowflake-connector-python` when you configure the environment.
+
+1. **Edit the SQL** in `sql/merchant_kpis.sql` so it selects from **your** Affirm tables. The query must return columns (aliases) including:
+   - `merchant_name` (must match merchant names in the managed-merchant list)
+   - `num_applications`, `approval_rate`, `take_rate`, `loans`, `aov`  
+   The file must contain `{MERCHANT_IN}` — the app replaces it with a quoted `IN (...)` list.
+
+2. **Set env vars** (local or Railway), for example:
+   - `SNOWFLAKE_ACCOUNT` = e.g. `AFFIRM-AFFIRMUSEAST`
+   - `SNOWFLAKE_USER` = your `@affirm.com` user
+   - `SNOWFLAKE_AUTHENTICATOR` = `externalbrowser` (local SSO) or use **key-pair** for headless deploy (see Snowflake docs)
+   - Optional: `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_ROLE`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_SCHEMA`
+   - Optional: `SNOWFLAKE_KPI_SQL_PATH` = absolute path to a custom SQL file
+   - For servers: `SNOWFLAKE_PRIVATE_KEY_PATH` + key-pair auth (no browser)
+
+3. **Install deps:** `pip install -r requirements.txt` (includes `snowflake-connector-python`).
+
+4. **Redeploy** after changing SQL or env vars.
+
+The dashboard adds columns **Apps**, **Approval %**, **Take rate %**, **Loans**, **AOV** and fills them from this query. If Snowflake is not configured or the query returns no row for a merchant, those cells stay empty.
+
+---
+
 ## API keys (for AI features)
 
 - **OPENAI_API_KEY** – Powers **both** “Generate email” and “Latest news”. Create an API key in the [OpenAI dashboard](https://platform.openai.com/api-keys). When set, email uses it for reach-out text and news uses it for a summary about the merchant (no separate news API needed).  

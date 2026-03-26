@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import csv
 from openpyxl import load_workbook
 
@@ -223,13 +225,30 @@ def next_action_for_priority(priority: str):
         return "Schedule planning touchpoint"
     return "Monitor"
 
-# Column index for CSM/owner in the Excel file (0=merchant, 1=unused, 2=CSM)
-CSM_COLUMN_INDEX = 2
+# Managed merchants sheet layout: 0=Account (merchant), 1=CSM, 2=FY26 FC GMV
+CSM_COLUMN_INDEX = 1
+GMV_COLUMN_INDEX = 2
 
-def read_merchants_from_xlsx(path: str) -> tuple[list[str], dict[str, str]]:
+
+def format_fy26_gmv(value) -> str:
+    """Format FY26 FC GMV for display (currency or pass-through string)."""
+    if value is None:
+        return ""
+    if isinstance(value, (int, float)):
+        v = float(value)
+        if abs(v) >= 1_000_000:
+            return f"${v / 1_000_000:.2f}M"
+        if abs(v) >= 1_000:
+            return f"${v:,.0f}"
+        return f"${v:,.2f}"
+    s = str(value).strip()
+    return s
+
+
+def read_merchants_from_xlsx(path: str) -> tuple[list[str], dict[str, str], dict[str, str]]:
     """
-    Returns (merchant_names, merchant_to_owner_map).
-    Owner (CSM name) is read from the CSM column in the sheet.
+    Returns (merchant_names, merchant_to_owner_map, merchant_to_fy26_gmv).
+    CSM from column 1; FY26 FC GMV from column 2 when present.
     """
     wb = load_workbook(path, data_only=True)
     ws = wb[wb.sheetnames[0]]
@@ -237,6 +256,7 @@ def read_merchants_from_xlsx(path: str) -> tuple[list[str], dict[str, str]]:
     names = []
     seen = set()
     merchant_to_owner: dict[str, str] = {}
+    merchant_to_gmv: dict[str, str] = {}
 
     for row in ws.iter_rows(values_only=True):
         value = row[0]
@@ -250,9 +270,17 @@ def read_merchants_from_xlsx(path: str) -> tuple[list[str], dict[str, str]]:
             names.append(name)
             csm = row[CSM_COLUMN_INDEX] if len(row) > CSM_COLUMN_INDEX else None
             merchant_to_owner[name] = normalize_name(str(csm)) if csm is not None and str(csm).strip() else ""
-    return names, merchant_to_owner
+            gmv_raw = row[GMV_COLUMN_INDEX] if len(row) > GMV_COLUMN_INDEX else None
+            merchant_to_gmv[name] = format_fy26_gmv(gmv_raw) if gmv_raw is not None and str(gmv_raw).strip() != "" else ""
+    return names, merchant_to_owner, merchant_to_gmv
 
-def build_rows(merchant_names: list[str], merchant_to_owner: dict[str, str]):
+
+def build_rows(
+    merchant_names: list[str],
+    merchant_to_owner: dict[str, str],
+    merchant_to_gmv: dict[str, str] | None = None,
+):
+    gmv_map = merchant_to_gmv or {}
     rows = []
     for merchant in merchant_names:
         vertical, tier, seasonality_codes = infer_vertical_and_seasonality(merchant)
@@ -295,6 +323,7 @@ def build_rows(merchant_names: list[str], merchant_to_owner: dict[str, str]):
                 "engagement_type": engagement_type_for_month(month_key, matched_peak),
                 "priority": priority,
                 "owner": merchant_to_owner.get(merchant, ""),
+                "fy26_fc_gmv": gmv_map.get(merchant, ""),
                 "status": "Planned",
                 "next_action": next_action_for_priority(priority),
                 "leadership_flag": leadership_flag(tier, priority),
@@ -305,8 +334,8 @@ def build_rows(merchant_names: list[str], merchant_to_owner: dict[str, str]):
     return rows
 
 def main():
-    merchant_names, merchant_to_owner = read_merchants_from_xlsx(INPUT_FILE)
-    rows = build_rows(merchant_names, merchant_to_owner)
+    merchant_names, merchant_to_owner, merchant_to_gmv = read_merchants_from_xlsx(INPUT_FILE)
+    rows = build_rows(merchant_names, merchant_to_owner, merchant_to_gmv)
 
     fieldnames = [
         "merchant",
@@ -320,6 +349,7 @@ def main():
         "engagement_type",
         "priority",
         "owner",
+        "fy26_fc_gmv",
         "status",
         "next_action",
         "leadership_flag",

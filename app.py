@@ -9,12 +9,17 @@ Set environment variables:
   GEMINI_API_KEY — optional; alternative for "Latest news" (Gemini + Google Search)
   NEWS_API_KEY   — optional; fallback for "Latest news"
   SERPER_API_KEY — optional; fallback for "Latest news"
+  GOOGLE_SHEET_ID — optional; spreadsheet ID for live data (see HOSTING.md)
+  GOOGLE_SHEET_GID — optional; sheet/tab gid (default 0)
 
 Run: flask run --host=0.0.0.0  (or: python app.py)
 Then open http://<this-machine-ip>:5000 for team access.
 """
+import csv
+import io
 import json
 import os
+import urllib.request
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -37,6 +42,66 @@ def get_openai_client():
         return None
 
 
+def normalize_name(name: str) -> str:
+    return " ".join(str(name or "").strip().split())
+
+
+def read_merchants_from_google_sheet(sheet_id: str, gid: str = "0"):
+    """
+    Fetch a published Google Sheet as CSV and return (merchant_names, merchant_to_owner, merchant_to_gmv, error).
+    Expects columns like: Account, CSM, FY26 FC GMV (headers detected flexibly).
+    """
+    from CSCC import format_fy26_gmv
+
+    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+    req = urllib.request.Request(url, headers={"User-Agent": "CSCC-Dashboard/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            raw = r.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        return None, None, None, str(e)
+    if "Sign in" in raw or "sign in" in raw:
+        return None, None, None, "Sheet is private. Publish to web: File → Share → Publish to web → choose this sheet → CSV."
+    reader = csv.reader(io.StringIO(raw))
+    rows = list(reader)
+    if not rows:
+        return None, None, None, "Sheet is empty."
+    headers = [normalize_name(h) for h in rows[0]]
+    name_col = 0
+    owner_col = 1
+    gmv_col = None
+    for i, h in enumerate(headers):
+        if not h:
+            continue
+        hl = h.lower()
+        if "merchant" in hl or "name" in hl or "account" in hl:
+            name_col = i
+        if "csm" in hl or "owner" in hl:
+            owner_col = i
+        if "gmv" in hl or "fy26" in hl or "fc gmv" in hl:
+            gmv_col = i
+    names = []
+    seen = set()
+    merchant_to_owner = {}
+    merchant_to_gmv = {}
+    for row in rows[1:]:
+        if name_col >= len(row):
+            continue
+        name = normalize_name(row[name_col])
+        if not name or name.lower() in ("all merchants", "new merchants"):
+            continue
+        if name not in seen:
+            seen.add(name)
+            names.append(name)
+            owner = normalize_name(row[owner_col]) if owner_col < len(row) else ""
+            merchant_to_owner[name] = owner or ""
+            gmv_raw = row[gmv_col] if gmv_col is not None and gmv_col < len(row) else None
+            merchant_to_gmv[name] = (
+                format_fy26_gmv(gmv_raw) if gmv_raw is not None and str(gmv_raw).strip() != "" else ""
+            )
+    return names, merchant_to_owner, merchant_to_gmv, None
+
+
 # User-facing messages when deployed without API keys (no env vars set)
 MSG_EMAIL_NOT_CONFIGURED = "Email generation is not configured for this deployment. Add OPENAI_API_KEY to enable it."
 MSG_NEWS_NOT_CONFIGURED = "Latest news is not configured for this deployment. Add OPENAI_API_KEY (or GEMINI_API_KEY, NEWS_API_KEY, SERPER_API_KEY) in Railway Variables and redeploy."
@@ -57,6 +122,9 @@ def generate_email_via_openai(payload):
     peak_months = payload.get("peak_months", "")
     next_action = payload.get("next_action", "")
     owner = payload.get("owner", "")
+    fy26_gmv = payload.get("fy26_fc_gmv", "")
+
+    gmv_line = f"- FY26 FC GMV with Affirm (forecast / plan): {fy26_gmv}.\n" if str(fy26_gmv).strip() else ""
 
     prompt = f"""You are a Client Success manager at Affirm. Write a short, professional reach-out email to the merchant contact at "{merchant}" to set up planning for their upcoming peak season.
 
@@ -65,7 +133,8 @@ Context:
 - Engagement month (when we're reaching out): {engagement_month}. Phase: {engagement_type}.
 - Their peak months: {peak_months}. Playbook focus: {playbook}.
 - Suggested next step: {next_action}.
-- CSM/Owner: {owner}.
+- CSM: {owner}.
+{gmv_line}
 
 Write one concise email (3–5 sentences): friendly, specific to their planning cycle and time of year, and ending with a clear ask (e.g. schedule a planning call or confirm promo details). Do not include subject line or signatures. Use a professional but warm tone."""
 
@@ -232,6 +301,57 @@ def fetch_news_gemini(merchant_name: str, limit: int = 8):
 
     # If no chunks, still return summary so the UI can show it
     return items, summary, None
+
+
+def _load_rows_from_csv_full():
+    """All engagement rows from bundled CSV (same shape as CSCC export)."""
+    path = ROOT / "merchant_success_command_center.csv"
+    if not path.exists():
+        return []
+    rows = []
+    with open(path, "r", encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            rows.append(dict(r))
+    return rows
+
+
+def get_dashboard_data():
+    """
+    Engagement rows from Google Sheet (if GOOGLE_SHEET_ID) or local CSV; merge Snowflake KPIs when configured.
+    Returns None if no sheet and no CSV.
+    """
+    sheet_id = os.environ.get("GOOGLE_SHEET_ID", "").strip()
+    if sheet_id:
+        gid = os.environ.get("GOOGLE_SHEET_GID", "0").strip() or "0"
+        names, merchant_to_owner, merchant_to_gmv, err = read_merchants_from_google_sheet(sheet_id, gid)
+        if err:
+            raise ValueError(err)
+        from CSCC import build_rows
+        rows = build_rows(names, merchant_to_owner, merchant_to_gmv)
+    else:
+        rows = _load_rows_from_csv_full()
+        if not rows:
+            return None
+
+    try:
+        from snowflake_kpis import attach_kpis_to_rows
+
+        rows = attach_kpis_to_rows(rows)
+    except Exception:
+        pass
+    return rows
+
+
+@app.route("/api/data")
+def api_data():
+    """Dashboard rows: Google Sheet or bundled CSV, plus Snowflake KPI columns when env is set."""
+    try:
+        rows = get_dashboard_data()
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    if rows is None:
+        return jsonify({"error": "No live data source configured"}), 404
+    return jsonify(rows)
 
 
 @app.route("/")

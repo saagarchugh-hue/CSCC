@@ -122,7 +122,7 @@ MSG_NEWS_NOT_CONFIGURED = "Latest news is not configured for this deployment. Ad
 
 
 def generate_email_via_openai(payload):
-    """Generate a short professional reach-out email using OpenAI."""
+    """Generate a short CSM reach-out email (peak-season financing + performance learning) via OpenAI."""
     client = get_openai_client()
     if not client:
         return None, MSG_EMAIL_NOT_CONFIGURED
@@ -142,7 +142,11 @@ def generate_email_via_openai(payload):
 
     prompt = f"""You are a Client Success manager at Affirm. Write a short, professional reach-out email to the merchant contact at "{merchant}" to set up planning for their upcoming peak season.
 
-Context:
+How Affirm works with merchants (use this naturally in the email—do not lecture, but reflect why the conversation matters):
+- Affirm partners with merchants to implement **buy now, pay later / financing programs** that are designed to **lift conversion and order value**, especially around **seasonal peaks** and high-intent shopping periods.
+- CSMs also help merchants use **competitive and historical performance data** (category benchmarks, prior-season learnings, program performance) so they can **iterate and improve** financing placement, messaging, and promos over time.
+
+Merchant-specific context:
 - Vertical: {vertical}. Tier: {tier}.
 - Engagement month (when we're reaching out): {engagement_month}. Phase: {engagement_type}.
 - Their peak months: {peak_months}. Playbook focus: {playbook}.
@@ -150,7 +154,7 @@ Context:
 - CSM: {owner}.
 {gmv_line}
 
-Write one concise email (3–5 sentences): friendly, specific to their planning cycle and time of year, and ending with a clear ask (e.g. schedule a planning call or confirm promo details). Do not include subject line or signatures. Use a professional but warm tone."""
+Write one concise email (3–5 sentences): tie the outreach to **peak-season readiness** and how Affirm financing can support **sales during their season**, and mention **learning from performance or benchmarks** where it fits (without making up numbers). End with a clear ask (e.g. schedule a planning call, align on promo or financing placement, or review last season’s learnings). Do not include a subject line or signatures. Professional but warm tone."""
 
     try:
         resp = client.chat.completions.create(

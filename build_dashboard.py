@@ -66,18 +66,19 @@ def build_html(data_json: str) -> str:
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     :root {{
-      --bg: #0f1216;
-      --surface: #1a1f28;
-      --surface-hover: #232a36;
-      --border: #2d3648;
-      --text: #e6edf5;
-      --text-muted: #8b9cb3;
-      --accent: #5c9ce6;
-      --accent-dim: #3d7bc2;
-      --critical: #e85d5d;
-      --high: #e8a85d;
-      --medium: #7bc2a8;
-      --low: #8b9cb3;
+      --bg: #eef1f6;
+      --surface: #ffffff;
+      --surface-hover: #e8edf5;
+      --border: #cfd8e3;
+      --text: #15202b;
+      --text-muted: #5a6b7d;
+      --accent: #2563eb;
+      --accent-dim: #1d4ed8;
+      --on-accent: #ffffff;
+      --critical: #c62828;
+      --high: #b45309;
+      --medium: #047857;
+      --low: #64748b;
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -90,6 +91,7 @@ def build_html(data_json: str) -> str:
     .header {{
       background: var(--surface);
       border-bottom: 1px solid var(--border);
+      box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
       padding: 1.25rem 1.5rem;
       display: flex;
       align-items: center;
@@ -128,7 +130,7 @@ def build_html(data_json: str) -> str:
       padding: 0.5rem 0.75rem;
       border: 1px solid var(--border);
       border-radius: 8px;
-      background: var(--bg);
+      background: var(--surface);
       color: var(--text);
       font-family: inherit;
       font-size: 0.9rem;
@@ -153,7 +155,7 @@ def build_html(data_json: str) -> str:
       padding: 0.45rem 0.6rem;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: var(--bg);
+      background: var(--surface);
       color: var(--text);
       font-family: inherit;
       font-size: 0.85rem;
@@ -213,16 +215,19 @@ def build_html(data_json: str) -> str:
     }}
     .btn-action:hover {{ background: var(--surface-hover); border-color: var(--accent); }}
     .btn-action:disabled {{ opacity: 0.6; cursor: not-allowed; }}
-    .btn-action.primary {{ background: var(--accent-dim); color: var(--text); border-color: var(--accent); }}
+    .btn-action.primary {{ background: var(--accent); color: var(--on-accent); border-color: var(--accent-dim); }}
+    .btn-action.primary:hover {{ background: var(--accent-dim); }}
     .modal-backdrop {{
-      position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000;
+      position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); z-index: 1000;
       display: none; align-items: center; justify-content: center; padding: 1rem;
     }}
     .modal-backdrop.open {{ display: flex; }}
     .modal {{
       background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      box-shadow: 0 16px 48px rgba(15, 23, 42, 0.12);
       max-width: 560px; width: 100%; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column;
     }}
+    .text-muted {{ color: var(--text-muted); }}
     .modal-header {{
       padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);
       display: flex; align-items: center; justify-content: space-between;
@@ -233,7 +238,7 @@ def build_html(data_json: str) -> str:
     .modal-body {{ padding: 1.25rem; overflow-y: auto; font-size: 0.9rem; }}
     .modal-body.loading {{ color: var(--text-muted); }}
     .email-body {{ white-space: pre-wrap; margin: 0 0 1rem; }}
-    .btn-copy {{ padding: 0.4rem 0.75rem; background: var(--accent); color: var(--bg); border: none; border-radius: 6px; font-size: 0.8rem; cursor: pointer; }}
+    .btn-copy {{ padding: 0.4rem 0.75rem; background: var(--accent); color: var(--on-accent); border: none; border-radius: 6px; font-size: 0.8rem; cursor: pointer; }}
     .btn-copy:hover {{ filter: brightness(1.1); }}
     .news-list {{ list-style: none; margin: 0; padding: 0; }}
     .news-list li {{ margin-bottom: 0.75rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border); }}
@@ -241,7 +246,7 @@ def build_html(data_json: str) -> str:
     .news-list a {{ color: var(--accent); text-decoration: none; }}
     .news-list a:hover {{ text-decoration: underline; }}
     .news-list .source {{ font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem; }}
-    .news-summary {{ margin: 0 0 1rem; padding: 0.75rem; background: var(--bg); border-radius: 8px; font-size: 0.9rem; }}
+    .news-summary {{ margin: 0 0 1rem; padding: 0.75rem; background: var(--surface-hover); border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; }}
     .news-summary.markdown-body h3 {{ margin: 1rem 0 0.5rem; font-size: 1rem; color: var(--text); }}
     .news-summary.markdown-body h3:first-child {{ margin-top: 0; }}
     .news-summary.markdown-body ul {{ margin: 0.35rem 0 0.75rem 1.1rem; padding: 0; }}
@@ -250,6 +255,45 @@ def build_html(data_json: str) -> str:
     .news-summary.markdown-body strong {{ color: var(--text); }}
     .news-source-tag {{ font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.75rem; }}
     .api-error {{ color: var(--critical); }}
+    .edit-hint {{
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-left: 0.5rem;
+      max-width: 28rem;
+      line-height: 1.35;
+    }}
+    .btn-text {{
+      background: none;
+      border: none;
+      color: var(--accent);
+      font-size: 0.8rem;
+      font-family: inherit;
+      cursor: pointer;
+      text-decoration: underline;
+      padding: 0;
+    }}
+    .btn-text:hover {{ color: var(--text); }}
+    td.editable-wrap {{ vertical-align: middle; }}
+    .cell-select, .cell-input {{
+      width: 100%;
+      max-width: 13rem;
+      min-width: 7rem;
+      padding: 0.3rem 0.45rem;
+      font-size: 0.8rem;
+      font-family: inherit;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }}
+    .cell-input {{ max-width: 22rem; }}
+    .cell-select:focus, .cell-input:focus {{
+      outline: none;
+      border-color: var(--accent);
+    }}
+    th.col-editable {{ cursor: default; }}
+    th.col-editable:hover {{ color: var(--text-muted); }}
+    th.col-editable .sort-icon {{ opacity: 0.35; }}
   </style>
 </head>
 <body>
@@ -292,6 +336,10 @@ def build_html(data_json: str) -> str:
       <select id="filter-month">
         <option value="">All</option>
       </select>
+      <span class="edit-hint" title="Edits are stored only in this browser; they are not written to the Google Sheet or server.">
+        <strong>Status</strong> &amp; <strong>Next action</strong> are editable (saved locally).
+      </span>
+      <button type="button" class="btn-text" id="btn-clear-edits">Clear my saved edits</button>
     </div>
   </div>
   <div class="table-wrap">
@@ -307,8 +355,8 @@ def build_html(data_json: str) -> str:
           <th data-key="priority">Priority <span class="sort-icon"></span></th>
           <th data-key="owner">CSM <span class="sort-icon"></span></th>
           <th data-key="fy26_fc_gmv">FY26 FC GMV <span class="sort-icon"></span></th>
-          <th data-key="status">Status <span class="sort-icon"></span></th>
-          <th data-key="next_action">Next action <span class="sort-icon"></span></th>
+          <th data-key="status" class="col-editable" title="Editable in this browser">Status <span class="sort-icon"></span></th>
+          <th data-key="next_action" class="col-editable" title="Editable in this browser">Next action <span class="sort-icon"></span></th>
           <th data-key="leadership_flag">Leadership <span class="sort-icon"></span></th>
           <th data-key="playbook">Playbook <span class="sort-icon"></span></th>
           <th data-key="num_applications">Apps <span class="sort-icon"></span></th>
@@ -345,8 +393,63 @@ def build_html(data_json: str) -> str:
   <script>
     let RAW = {data_escaped};
     const COLS = ['merchant','vertical','tier','peak_months','engagement_month_label','engagement_type','priority','owner','status','next_action','leadership_flag','playbook'];
+    const LS_KEY = 'cscc_edits_v1';
+    const STATUS_OPTIONS = ['Planned', 'In progress', 'Completed', 'Blocked', 'Deferred', 'On hold'];
+
+    function attrEscape(s) {{
+      return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    }}
+    function rowKey(r) {{
+      return r.merchant + '::' + r.engagement_month_sort;
+    }}
+    function loadOverrides() {{
+      try {{
+        const raw = localStorage.getItem(LS_KEY);
+        if (!raw) return {{}};
+        const o = JSON.parse(raw);
+        return o && typeof o === 'object' ? o : {{}};
+      }} catch (e) {{ return {{}}; }}
+    }}
+    function saveOverrides(obj) {{
+      try {{ localStorage.setItem(LS_KEY, JSON.stringify(obj)); }} catch (e) {{}}
+    }}
+    function mergeStoredOverridesIntoData(rows) {{
+      const o = loadOverrides();
+      rows.forEach((r, i) => {{
+        const k = rowKey(r);
+        if (!o[k]) return;
+        if (o[k].status != null) rows[i].status = o[k].status;
+        if (o[k].next_action != null) rows[i].next_action = o[k].next_action;
+      }});
+    }}
+    function patchRowField(merchant, ms, field, value) {{
+      const i = data.findIndex(r => r.merchant === merchant && r.engagement_month_sort === ms);
+      if (i < 0) return;
+      data[i][field] = value;
+      const o = loadOverrides();
+      const k = rowKey(data[i]);
+      o[k] = Object.assign({{}}, o[k], {{ status: data[i].status, next_action: data[i].next_action }});
+      saveOverrides(o);
+    }}
+    function statusSelectHtml(r) {{
+      let cur = (r.status || 'Planned').trim();
+      if (!cur) cur = 'Planned';
+      let html = '<select class="cell-select" data-m="' + attrEscape(r.merchant) + '" data-ms="' + attrEscape(r.engagement_month_sort) + '" aria-label="Status">';
+      if (!STATUS_OPTIONS.includes(cur)) {{
+        html += '<option value="' + attrEscape(cur) + '" selected>' + escape(cur) + '</option>';
+      }}
+      STATUS_OPTIONS.forEach(o => {{
+        html += '<option value="' + attrEscape(o) + '"' + (cur === o ? ' selected' : '') + '>' + escape(o) + '</option>';
+      }});
+      html += '</select>';
+      return html;
+    }}
+    function nextActionInputHtml(r) {{
+      return '<input type="text" class="cell-input" data-m="' + attrEscape(r.merchant) + '" data-ms="' + attrEscape(r.engagement_month_sort) + '" value="' + attrEscape(r.next_action) + '" aria-label="Next action" placeholder="Next step…" />';
+    }}
 
     let data = RAW.slice();
+    mergeStoredOverridesIntoData(data);
     let sortKey = 'engagement_month_sort';
     let sortDir = 1;
     let currentRows = [];
@@ -361,7 +464,11 @@ def build_html(data_json: str) -> str:
         const r = await fetch(apiUrl('/api/data'));
         if (r.ok) {{
           const d = await r.json();
-          if (Array.isArray(d) && d.length) {{ RAW = d; data = RAW.slice(); }}
+          if (Array.isArray(d) && d.length) {{
+          RAW = d;
+          data = RAW.slice();
+          mergeStoredOverridesIntoData(data);
+        }}
         }}
       }} catch (e) {{}}
     }}
@@ -442,8 +549,8 @@ def build_html(data_json: str) -> str:
           <td class="priority-${{ escape(r.priority) }}">${{ escape(r.priority) }}</td>
           <td>${{ escape(r.owner) }}</td>
           <td>${{ escape(r.fy26_fc_gmv) }}</td>
-          <td>${{ escape(r.status) }}</td>
-          <td>${{ escape(r.next_action) }}</td>
+          <td class="editable-wrap">${{ statusSelectHtml(r) }}</td>
+          <td class="editable-wrap">${{ nextActionInputHtml(r) }}</td>
           <td class="${{ r.leadership_flag === 'Yes' ? 'leadership-yes' : '' }}">${{ escape(r.leadership_flag) }}</td>
           <td>${{ escape(r.playbook) }}</td>
           <td>${{ escape(r.num_applications) }}</td>
@@ -460,6 +567,22 @@ def build_html(data_json: str) -> str:
       }});
       tbody.querySelectorAll('.btn-email').forEach(btn => btn.addEventListener('click', onGenerateEmail));
       tbody.querySelectorAll('.btn-news').forEach(btn => btn.addEventListener('click', onLatestNews));
+      bindEditableCells();
+    }}
+
+    function bindEditableCells() {{
+      if (tbody._csccEditBound) return;
+      tbody._csccEditBound = true;
+      tbody.addEventListener('change', (e) => {{
+        const t = e.target;
+        if (!t.classList || !t.classList.contains('cell-select')) return;
+        patchRowField(t.getAttribute('data-m'), t.getAttribute('data-ms'), 'status', t.value);
+      }});
+      tbody.addEventListener('blur', (e) => {{
+        const t = e.target;
+        if (!t.classList || !t.classList.contains('cell-input')) return;
+        patchRowField(t.getAttribute('data-m'), t.getAttribute('data-ms'), 'next_action', t.value);
+      }}, true);
     }}
 
     function escape(s) {{
@@ -578,9 +701,15 @@ def build_html(data_json: str) -> str:
       }}
     }}
 
+    document.getElementById('btn-clear-edits').addEventListener('click', () => {{
+      if (!confirm('Clear all saved Status and Next action values for this browser?')) return;
+      try {{ localStorage.removeItem(LS_KEY); }} catch (e) {{}}
+      data = RAW.slice();
+      render();
+    }});
+
     (async function() {{
       await loadData();
-      data = RAW.slice();
 
       document.querySelectorAll('th[data-key]').forEach(th => {{
         th.addEventListener('click', () => {{

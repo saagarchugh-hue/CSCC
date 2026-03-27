@@ -163,6 +163,11 @@ def build_html(data_json: str) -> str:
     .table-wrap {{
       overflow-x: auto;
       padding: 1rem 1.5rem;
+      background: var(--surface);
+      margin: 0 1.5rem 1.5rem;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
     }}
     table {{
       width: 100%;
@@ -191,11 +196,36 @@ def build_html(data_json: str) -> str:
       border-bottom: 1px solid var(--border);
     }}
     tr:hover td {{ background: var(--surface-hover); }}
-    .priority-Critical {{ color: var(--critical); font-weight: 500; }}
-    .priority-High {{ color: var(--high); }}
-    .priority-Medium {{ color: var(--medium); }}
-    .priority-Low {{ color: var(--low); }}
-    .leadership-yes {{ color: var(--accent); font-weight: 500; }}
+    tbody tr:nth-child(even) td {{ background: rgba(248, 250, 252, 0.65); }}
+    tbody tr:nth-child(even):hover td {{ background: var(--surface-hover); }}
+    tr[data-tier="0"] td:first-child {{ box-shadow: inset 4px 0 0 #7c3aed; }}
+    tr[data-tier="1"] td:first-child {{ box-shadow: inset 4px 0 0 #2563eb; }}
+    tr[data-tier="2"] td:first-child {{ box-shadow: inset 4px 0 0 #0891b2; }}
+    tr[data-tier=""] td:first-child {{ box-shadow: none; }}
+    .tier-pill {{
+      display: inline-block;
+      padding: 0.2rem 0.55rem;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }}
+    .tier-pill.tier-0 {{ background: #ede9fe; color: #5b21b6; border: 1px solid #c4b5fd; }}
+    .tier-pill.tier-1 {{ background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }}
+    .tier-pill.tier-2 {{ background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; }}
+    .tier-pill.tier-unknown {{ background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }}
+    .priority-pill {{
+      display: inline-block;
+      padding: 0.15rem 0.55rem;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }}
+    .priority-pill.priority-Critical {{ background: #fee2e2; color: #991b1b; }}
+    .priority-pill.priority-High {{ background: #ffedd5; color: #9a3412; }}
+    .priority-pill.priority-Medium {{ background: #d1fae5; color: #065f46; }}
+    .priority-pill.priority-Low {{ background: #f1f5f9; color: #475569; }}
+    .leadership-yes {{ color: var(--accent); font-weight: 600; }}
     .empty-state {{
       text-align: center;
       padding: 3rem 1rem;
@@ -294,6 +324,17 @@ def build_html(data_json: str) -> str:
     th.col-editable {{ cursor: default; }}
     th.col-editable:hover {{ color: var(--text-muted); }}
     th.col-editable .sort-icon {{ opacity: 0.35; }}
+    .tier-legend {{
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem 0.75rem;
+      padding: 0.5rem 1.5rem 0;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }}
+    .tier-legend .legend-label {{ font-weight: 600; color: var(--text); margin-right: 0.25rem; }}
+    .tier-legend .legend-note {{ margin-left: 0.5rem; opacity: 0.9; }}
   </style>
 </head>
 <body>
@@ -342,30 +383,17 @@ def build_html(data_json: str) -> str:
       <button type="button" class="btn-text" id="btn-clear-edits">Clear my saved edits</button>
     </div>
   </div>
+  <div class="tier-legend" aria-label="Tier color key">
+    <span class="legend-label">Tier key</span>
+    <span class="tier-pill tier-0">Tier 0</span>
+    <span class="tier-pill tier-1">Tier 1</span>
+    <span class="tier-pill tier-2">Tier 2</span>
+    <span class="legend-note">Row accent matches tier · KPI columns appear when Snowflake data is present</span>
+  </div>
   <div class="table-wrap">
     <table>
       <thead>
-        <tr>
-          <th data-key="merchant">Merchant <span class="sort-icon"></span></th>
-          <th data-key="vertical">Vertical <span class="sort-icon"></span></th>
-          <th data-key="tier">Tier <span class="sort-icon"></span></th>
-          <th data-key="peak_months">Peak months <span class="sort-icon"></span></th>
-          <th data-key="engagement_month_label">Engagement month <span class="sort-icon"></span></th>
-          <th data-key="engagement_type">Engagement type <span class="sort-icon"></span></th>
-          <th data-key="priority">Priority <span class="sort-icon"></span></th>
-          <th data-key="owner">CSM <span class="sort-icon"></span></th>
-          <th data-key="fy26_fc_gmv">FY26 FC GMV <span class="sort-icon"></span></th>
-          <th data-key="status" class="col-editable" title="Editable in this browser">Status <span class="sort-icon"></span></th>
-          <th data-key="next_action" class="col-editable" title="Editable in this browser">Next action <span class="sort-icon"></span></th>
-          <th data-key="leadership_flag">Leadership <span class="sort-icon"></span></th>
-          <th data-key="playbook">Playbook <span class="sort-icon"></span></th>
-          <th data-key="num_applications">Apps <span class="sort-icon"></span></th>
-          <th data-key="approval_rate">Approval % <span class="sort-icon"></span></th>
-          <th data-key="take_rate">Take rate % <span class="sort-icon"></span></th>
-          <th data-key="loans">Loans <span class="sort-icon"></span></th>
-          <th data-key="aov">AOV <span class="sort-icon"></span></th>
-          <th class="no-sort">Actions</th>
-        </tr>
+        <tr id="thead-row"></tr>
       </thead>
       <tbody id="tbody"></tbody>
     </table>
@@ -392,9 +420,30 @@ def build_html(data_json: str) -> str:
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script>
     let RAW = {data_escaped};
-    const COLS = ['merchant','vertical','tier','peak_months','engagement_month_label','engagement_type','priority','owner','status','next_action','leadership_flag','playbook'];
     const LS_KEY = 'cscc_edits_v1';
     const STATUS_OPTIONS = ['Planned', 'In progress', 'Completed', 'Blocked', 'Deferred', 'On hold'];
+    const TABLE_COLUMNS = [
+      {{ key: 'merchant', label: 'Merchant', sortKey: 'merchant' }},
+      {{ key: 'vertical', label: 'Vertical', sortKey: 'vertical' }},
+      {{ key: 'tier', label: 'Tier', sortKey: 'tier', tierPill: true }},
+      {{ key: 'peak_months', label: 'Peak months', sortKey: 'peak_months' }},
+      {{ key: 'engagement_month_label', label: 'Engagement month', sortKey: 'engagement_month_label' }},
+      {{ key: 'engagement_type', label: 'Engagement type', sortKey: 'engagement_type' }},
+      {{ key: 'priority', label: 'Priority', sortKey: 'priority', priorityPill: true }},
+      {{ key: 'owner', label: 'CSM', sortKey: 'owner' }},
+      {{ key: 'fy26_fc_gmv', label: 'FY26 FC GMV', sortKey: 'fy26_fc_gmv', hideIfEmpty: true }},
+      {{ key: 'status', label: 'Status', sortKey: 'status', editable: true }},
+      {{ key: 'next_action', label: 'Next action', sortKey: 'next_action', editable: true }},
+      {{ key: 'leadership_flag', label: 'Leadership', sortKey: 'leadership_flag', hideIfEmpty: true }},
+      {{ key: 'playbook', label: 'Playbook', sortKey: 'playbook' }},
+      {{ key: 'num_applications', label: 'Apps', sortKey: 'num_applications', hideIfEmpty: true }},
+      {{ key: 'approval_rate', label: 'Approval %', sortKey: 'approval_rate', hideIfEmpty: true }},
+      {{ key: 'take_rate', label: 'Take rate %', sortKey: 'take_rate', hideIfEmpty: true }},
+      {{ key: 'loans', label: 'Loans', sortKey: 'loans', hideIfEmpty: true }},
+      {{ key: 'aov', label: 'AOV', sortKey: 'aov', hideIfEmpty: true }},
+      {{ key: 'actions', label: 'Actions', sortKey: null, isActions: true }},
+    ];
+    let visibleColumnKeys = '';
 
     function attrEscape(s) {{
       return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
@@ -448,6 +497,62 @@ def build_html(data_json: str) -> str:
       return '<input type="text" class="cell-input" data-m="' + attrEscape(r.merchant) + '" data-ms="' + attrEscape(r.engagement_month_sort) + '" value="' + attrEscape(r.next_action) + '" aria-label="Next action" placeholder="Next step…" />';
     }}
 
+    function cellHasValue(v) {{
+      if (v == null) return false;
+      const s = String(v).trim();
+      if (s === '' || s === '—' || s === '-') return false;
+      return true;
+    }}
+    function getVisibleColumns(rows) {{
+      return TABLE_COLUMNS.filter(col => {{
+        if (col.isActions) return true;
+        if (col.hideIfEmpty) return rows.some(r => cellHasValue(r[col.key]));
+        return true;
+      }});
+    }}
+    function tierDigit(tier) {{
+      const m = String(tier || '').match(/(\\d)/);
+      return m ? m[1] : '';
+    }}
+    function tierPillHtml(tier) {{
+      const d = tierDigit(tier);
+      const cls = d ? 'tier-pill tier-' + d : 'tier-pill tier-unknown';
+      return '<span class="' + cls + '">' + escape(tier) + '</span>';
+    }}
+    function renderTableHeader(visible) {{
+      const theadRow = document.getElementById('thead-row');
+      theadRow.innerHTML = visible.map(col => {{
+        if (col.isActions) return '<th class="no-sort">' + escape(col.label) + '</th>';
+        const ed = col.editable ? ' class="col-editable" title="Editable in this browser"' : '';
+        return '<th data-key="' + col.key + '"' + ed + '>' + escape(col.label) + ' <span class="sort-icon"></span></th>';
+      }}).join('');
+    }}
+    function updateSortIndicator() {{
+      document.querySelectorAll('th[data-key]').forEach(h => h.classList.remove('sorted-asc', 'sorted-desc'));
+      const headerKey = sortKey === 'engagement_month_sort' ? 'engagement_month_label' : sortKey;
+      const th = document.querySelector('th[data-key="' + headerKey + '"]');
+      if (th) th.classList.add(sortDir === 1 ? 'sorted-asc' : 'sorted-desc');
+    }}
+    function renderCellHtml(col, r, idx) {{
+      if (col.key === 'tier') return '<td>' + tierPillHtml(r.tier) + '</td>';
+      if (col.priorityPill) {{
+        const p = String(r.priority || '');
+        const safeClass = p.replace(/[^a-zA-Z0-9_-]/g, '');
+        return '<td><span class="priority-pill priority-' + safeClass + '">' + escape(p) + '</span></td>';
+      }}
+      if (col.key === 'status') return '<td class="editable-wrap">' + statusSelectHtml(r) + '</td>';
+      if (col.key === 'next_action') return '<td class="editable-wrap">' + nextActionInputHtml(r) + '</td>';
+      if (col.key === 'actions') {{
+        return '<td><div class="btn-row"><button type="button" class="btn-action primary btn-email" data-idx="' + idx + '">Generate email</button><button type="button" class="btn-action btn-news" data-idx="' + idx + '">Latest news</button></div></td>';
+      }}
+      if (col.key === 'leadership_flag') {{
+        const lf = escape(r.leadership_flag);
+        const c = r.leadership_flag === 'Yes' ? 'leadership-yes' : '';
+        return '<td class="' + c + '">' + lf + '</td>';
+      }}
+      return '<td>' + escape(r[col.key]) + '</td>';
+    }}
+
     let data = RAW.slice();
     mergeStoredOverridesIntoData(data);
     let sortKey = 'engagement_month_sort';
@@ -468,6 +573,7 @@ def build_html(data_json: str) -> str:
           RAW = d;
           data = RAW.slice();
           mergeStoredOverridesIntoData(data);
+          visibleColumnKeys = '';
         }}
         }}
       }} catch (e) {{}}
@@ -525,6 +631,13 @@ def build_html(data_json: str) -> str:
         return 0;
       }});
 
+      const visible = getVisibleColumns(data);
+      const keyStr = visible.map(c => c.key).join(',');
+      if (keyStr !== visibleColumnKeys) {{
+        visibleColumnKeys = keyStr;
+        renderTableHeader(visible);
+      }}
+
       tbody.innerHTML = '';
       if (sorted.length === 0) {{
         emptyState.style.display = 'block';
@@ -539,35 +652,14 @@ def build_html(data_json: str) -> str:
 
       sorted.forEach((r, idx) => {{
         const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${{ escape(r.merchant) }}</td>
-          <td>${{ escape(r.vertical) }}</td>
-          <td>${{ escape(r.tier) }}</td>
-          <td>${{ escape(r.peak_months) }}</td>
-          <td>${{ escape(r.engagement_month_label) }}</td>
-          <td>${{ escape(r.engagement_type) }}</td>
-          <td class="priority-${{ escape(r.priority) }}">${{ escape(r.priority) }}</td>
-          <td>${{ escape(r.owner) }}</td>
-          <td>${{ escape(r.fy26_fc_gmv) }}</td>
-          <td class="editable-wrap">${{ statusSelectHtml(r) }}</td>
-          <td class="editable-wrap">${{ nextActionInputHtml(r) }}</td>
-          <td class="${{ r.leadership_flag === 'Yes' ? 'leadership-yes' : '' }}">${{ escape(r.leadership_flag) }}</td>
-          <td>${{ escape(r.playbook) }}</td>
-          <td>${{ escape(r.num_applications) }}</td>
-          <td>${{ escape(r.approval_rate) }}</td>
-          <td>${{ escape(r.take_rate) }}</td>
-          <td>${{ escape(r.loans) }}</td>
-          <td>${{ escape(r.aov) }}</td>
-          <td><div class="btn-row">
-            <button type="button" class="btn-action primary btn-email" data-idx="${{ idx }}">Generate email</button>
-            <button type="button" class="btn-action btn-news" data-idx="${{ idx }}">Latest news</button>
-          </div></td>
-        `;
+        tr.setAttribute('data-tier', tierDigit(r.tier));
+        tr.innerHTML = visible.map(col => renderCellHtml(col, r, idx)).join('');
         tbody.appendChild(tr);
       }});
       tbody.querySelectorAll('.btn-email').forEach(btn => btn.addEventListener('click', onGenerateEmail));
       tbody.querySelectorAll('.btn-news').forEach(btn => btn.addEventListener('click', onLatestNews));
       bindEditableCells();
+      updateSortIndicator();
     }}
 
     function bindEditableCells() {{
@@ -705,24 +797,22 @@ def build_html(data_json: str) -> str:
       if (!confirm('Clear all saved Status and Next action values for this browser?')) return;
       try {{ localStorage.removeItem(LS_KEY); }} catch (e) {{}}
       data = RAW.slice();
+      visibleColumnKeys = '';
       render();
     }});
 
     (async function() {{
       await loadData();
 
-      document.querySelectorAll('th[data-key]').forEach(th => {{
-        th.addEventListener('click', () => {{
-          const key = th.getAttribute('data-key');
-          const sortCol = key === 'engagement_month_label' ? 'engagement_month_sort' : key;
-          if (sortKey === sortCol) sortDir = -sortDir;
-          else {{ sortKey = sortCol; sortDir = 1; }}
-          document.querySelectorAll('th[data-key]').forEach(h => h.classList.remove('sorted-asc','sorted-desc'));
-          th.classList.add(sortDir === 1 ? 'sorted-asc' : 'sorted-desc');
-          render();
-        }});
+      document.getElementById('thead-row').addEventListener('click', (e) => {{
+        const th = e.target.closest('th[data-key]');
+        if (!th) return;
+        const key = th.getAttribute('data-key');
+        const sortCol = key === 'engagement_month_label' ? 'engagement_month_sort' : key;
+        if (sortKey === sortCol) sortDir = -sortDir;
+        else {{ sortKey = sortCol; sortDir = 1; }}
+        render();
       }});
-      document.querySelector('th[data-key="engagement_month_label"]').classList.add('sorted-asc');
 
       document.getElementById('search').addEventListener('input', render);
       document.getElementById('filter-vertical').addEventListener('change', render);

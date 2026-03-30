@@ -1,7 +1,7 @@
 """
 Flask server for the Merchant Success Command Center dashboard.
 Serves the dashboard and provides AI-backed API endpoints:
-  - POST /api/generate-email — generate a reach-out email from merchant context
+  - POST /api/generate-email — generate multiple themed email drafts (uses merchant context + optional news intel from the client)
   - GET  /api/news?merchant=... — fetch latest news about the merchant
 
 Set environment variables:
@@ -20,6 +20,7 @@ import csv
 import io
 import json
 import os
+import re
 import urllib.request
 from pathlib import Path
 
@@ -121,13 +122,54 @@ MSG_EMAIL_NOT_CONFIGURED = "Email generation is not configured for this deployme
 MSG_NEWS_NOT_CONFIGURED = "Latest news is not configured for this deployment. Add OPENAI_API_KEY (or GEMINI_API_KEY, NEWS_API_KEY, SERPER_API_KEY) in Railway Variables and redeploy."
 
 
-def generate_email_via_openai(payload):
-    """Generate a short CSM reach-out email (peak-season financing + performance learning) via OpenAI."""
+def _format_articles_for_prompt(articles: list | None) -> str:
+    lines = []
+    for a in (articles or [])[:12]:
+        if not isinstance(a, dict):
+            continue
+        t = (a.get("title") or "").strip()
+        u = (a.get("url") or "").strip()
+        if t:
+            lines.append(f"- {t}" + (f" ({u})" if u else ""))
+    return "\n".join(lines) if lines else "(none)"
+
+
+def _parse_email_drafts_json(raw: str) -> tuple[list[dict] | None, str | None]:
+    text = (raw or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```\s*$", "", text)
+    try:
+        obj = json.loads(text)
+    except json.JSONDecodeError as e:
+        return None, f"Could not parse model response as JSON: {e}"
+    drafts = obj.get("drafts")
+    if not isinstance(drafts, list):
+        return None, "Response missing drafts array"
+    out: list[dict] = []
+    for d in drafts:
+        if not isinstance(d, dict):
+            continue
+        theme = str(d.get("theme", "Draft")).strip() or "Draft"
+        body = str(d.get("body", "")).strip()
+        if body:
+            out.append({"theme": theme, "body": body})
+    if not out:
+        return None, "No non-empty draft bodies in response"
+    return out, None
+
+
+def generate_email_drafts_via_openai(payload: dict) -> tuple[list[dict] | None, bool | None, str | None]:
+    """
+    Return (drafts, news_was_used, error). Each draft: {"theme": str, "body": str}.
+    Client should POST news_summary / news_articles / news_source from the same /api/news flow
+    used by “Latest news” so drafts align with that intelligence.
+    """
     client = get_openai_client()
     if not client:
-        return None, MSG_EMAIL_NOT_CONFIGURED
+        return None, None, MSG_EMAIL_NOT_CONFIGURED
 
-    merchant = payload.get("merchant", "")
+    merchant = payload.get("merchant", "") or ""
     vertical = payload.get("vertical", "")
     tier = payload.get("tier", "")
     engagement_month = payload.get("engagement_month_label", "")
@@ -138,34 +180,69 @@ def generate_email_via_openai(payload):
     owner = payload.get("owner", "")
     fy26_gmv = payload.get("fy26_fc_gmv", "")
 
+    news_summary = (payload.get("news_summary") or "").strip()
+    news_articles = payload.get("news_articles") or []
+    if not isinstance(news_articles, list):
+        news_articles = []
+    news_source = (payload.get("news_source") or "").strip()
+
+    news_used = bool(news_summary or news_articles)
+    headlines_block = _format_articles_for_prompt(news_articles)
+
     gmv_line = f"- FY26 FC GMV with Affirm (forecast / plan): {fy26_gmv}.\n" if str(fy26_gmv).strip() else ""
 
-    prompt = f"""You are a Client Success manager at Affirm. Write a short, professional reach-out email to the merchant contact at "{merchant}" to set up planning for their upcoming peak season.
+    intel_block = f"""**Merchant intelligence** (output from the same “Latest news” style research the CSM can open in the dashboard; may include executive summary, legal context, news, competitive/industry, and **actionable next steps for the CSM**):
+- Source label: {news_source or "(not provided)"}
+- Summary / analysis (often Markdown; treat recommendations as guidance, not as facts the merchant has confirmed):
+{news_summary if news_summary else "(No brief was supplied—generate drafts from merchant context only; do not invent current events.)"}
+- Headlines / citations (if any):
+{headlines_block}
+"""
 
-How Affirm works with merchants (use this naturally in the email—do not lecture, but reflect why the conversation matters):
-- Affirm partners with merchants to implement **buy now, pay later / financing programs** that are designed to **lift conversion and order value**, especially around **seasonal peaks** and high-intent shopping periods.
-- CSMs also help merchants use **competitive and historical performance data** (category benchmarks, prior-season learnings, program performance) so they can **iterate and improve** financing placement, messaging, and promos over time.
+    prompt = f"""You help Affirm Client Success managers write **short outreach emails** to merchant contacts. Produce **multiple distinct draft emails** they can send, each with a different **theme / angle**.
 
-Merchant-specific context:
+How Affirm works with merchants (weave in naturally, no jargon dump):
+- **Financing programs** (BNPL, etc.) to **lift conversion and order value**, especially in **seasonal peaks**.
+- **Competitive and historical performance data** so merchants can **iterate** on placement, messaging, and promos.
+
+**Merchant row**
+- Merchant: {merchant}
 - Vertical: {vertical}. Tier: {tier}.
-- Engagement month (when we're reaching out): {engagement_month}. Phase: {engagement_type}.
-- Their peak months: {peak_months}. Playbook focus: {playbook}.
-- Suggested next step: {next_action}.
-- CSM: {owner}.
+- Engagement month: {engagement_month}. Phase: {engagement_type}.
+- Peak months: {peak_months}. Playbook: {playbook}.
+- Dashboard next action: {next_action}. CSM (sign only if natural): {owner}.
 {gmv_line}
+{intel_block}
 
-Write one concise email (3–5 sentences): tie the outreach to **peak-season readiness** and how Affirm financing can support **sales during their season**, and mention **learning from performance or benchmarks** where it fits (without making up numbers). End with a clear ask (e.g. schedule a planning call, align on promo or financing placement, or review last season’s learnings). Do not include a subject line or signatures. Professional but warm tone."""
+**Your task**
+Return **only** valid JSON (no markdown fences) with this shape:
+{{
+  "drafts": [
+    {{"theme": "Short label, 4–10 words", "body": "Email body only: 3–6 sentences. No subject line. No signature block."}}
+  ]
+}}
 
+Rules:
+- Include **at least 4** drafts, at most 6. Each **theme** must be clearly different (e.g. reacting to **recent news or industry context**, doubling down on **CSM action items / recommendations** from the intel brief, **peak-season financing readiness**, **benchmarks / prior-season learning / program optimization**, **relationship / planning check-in**).
+- **At least two** drafts must **explicitly** reference something concrete from the intelligence brief (news, risk, competitor, or a **recommended CSM step**)—if the brief is empty, say you’re reaching out for planning without fabricating news.
+- Do not invent numbers, deals, or events not supported by the brief or merchant row. Keep tone professional and warm.
+- Do not include a subject line or “Best,” signatures in **body**—the CSM will paste into their client."""
+
+    model = os.environ.get("OPENAI_EMAIL_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
     try:
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=400,
+            response_format={"type": "json_object"},
+            max_tokens=4096,
         )
-        text = (resp.choices[0].message.content or "").strip()
-        return text, None
+        raw = (resp.choices[0].message.content or "").strip()
+        drafts, perr = _parse_email_drafts_json(raw)
+        if perr:
+            return None, news_used, perr
+        return drafts, news_used, None
     except Exception as e:
-        return None, str(e)
+        return None, news_used, str(e)
 
 
 def _openai_responses_text_and_citations(response, limit: int) -> tuple[str, list[dict]]:
@@ -517,11 +594,11 @@ def api_generate_email():
         payload = request.get_json() or {}
     except Exception:
         payload = {}
-    email, err = generate_email_via_openai(payload)
+    drafts, news_used, err = generate_email_drafts_via_openai(payload)
     if err:
         is_not_configured = err == MSG_EMAIL_NOT_CONFIGURED
         return jsonify({"error": err}), 400 if is_not_configured else 500
-    return jsonify({"email": email})
+    return jsonify({"drafts": drafts, "news_used": bool(news_used)})
 
 
 @app.route("/api/news")

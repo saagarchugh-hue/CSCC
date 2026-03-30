@@ -98,6 +98,31 @@ Run the Flask app on a machine that’s reachable on your internal network (e.g.
 
 ---
 
+## Quicksilver (Affirm internal)
+
+**This Cursor workspace cannot read Affirm’s internal GitHub repos** (for example the **lakehouse** repo), so Quicksilver-specific steps—service names, namespaces, approval workflows, and exact YAML—have to come from **your team’s internal docs** or by opening that repo locally and following its Quicksilver guide.
+
+**Can this app run on Quicksilver?** In general, **yes**, if Quicksilver (or the path documented next to lakehouse) supports a **long-running HTTP service**—same idea as Railway or an internal VM: a Python process listens on a port and serves the Flask app.
+
+What to align with internal runbooks:
+
+| What to confirm | What this project needs |
+|-----------------|-------------------------|
+| Container vs buildpack vs VM | Python 3, `pip install -r requirements.txt` |
+| Start command | Production: `gunicorn -w 1 -b 0.0.0.0:$PORT app:app` (add `gunicorn` to `requirements.txt` if you use this). The app already reads `PORT` in `app.py`. |
+| Build step | `python build_dashboard.py` so `dashboard.html` exists at deploy time (or commit a prebuilt `dashboard.html`). |
+| Secrets | API keys and optional `GOOGLE_SHEET_ID`, Snowflake env vars—use your org’s secret store as required by Quicksilver. |
+
+**Practical next steps**
+
+1. In the **lakehouse** repo (or Affirm Platform docs), search for **Quicksilver** and the standard pattern for **Python / Flask** or **Docker** services.
+2. If the platform expects a **Dockerfile**, add one that installs dependencies, runs the dashboard build if needed, and starts **gunicorn** on `$PORT`.
+3. Ask your team about **internal DNS**, **SSO**, and where to register **environment variables** for production keys.
+
+If you paste a **sanitized** Quicksilver or Dockerfile snippet from the lakehouse repo (no secrets), it can be matched to this repo’s layout in a follow-up change.
+
+---
+
 ## Option 2: Cloud deployment (Railway, Render, Fly.io, etc.)
 
 Deploy the Flask app so it’s reachable via a public URL (you can still restrict access with auth or VPN).
@@ -189,7 +214,7 @@ The dashboard adds columns **Apps**, **Approval %**, **Take rate %**, **Loans**,
 
 ## API keys (for AI features)
 
-- **OPENAI_API_KEY** – Powers **“Generate email”** and **“Latest news”** when other news backends are unavailable or empty. **Latest news** uses the **Responses API** with the **`web_search`** tool (live web + URL citations), not plain Chat Completions. Optional: **`OPENAI_NEWS_MODEL`** (default `gpt-4o`). Create a key in the [OpenAI dashboard](https://platform.openai.com/api-keys).  
+- **OPENAI_API_KEY** – Powers **“Generate email”** (multiple themed drafts, JSON via Chat Completions; the browser first calls **Latest news** and sends that intel with the row) and **“Latest news”** when other news backends are unavailable or empty. **Latest news** can use the **Responses API** with the **`web_search`** tool (live web + URL citations). Optional: **`OPENAI_NEWS_MODEL`** (default `gpt-4o`), **`OPENAI_EMAIL_MODEL`** (default `gpt-4o-mini`) for draft generation. Create a key in the [OpenAI dashboard](https://platform.openai.com/api-keys).  
   **Where to set:** Railway → your project → **Variables** → Add variable `OPENAI_API_KEY` = your key (exact name). After adding or changing variables, **trigger a redeploy** (e.g. Deployments → ⋮ → Redeploy) so the app sees the new value. Never commit the key to git.
 - **GEMINI_API_KEY** – **Recommended for “Latest news”:** the app tries **Gemini + Google Search** first when this key is set, so results are grounded in **current** web sources. Get a key at [Google AI Studio](https://aistudio.google.com/apikey).
 - **NEWS_API_KEY** – Optional; fallback for “Latest news”. Free tier at [newsapi.org](https://newsapi.org/).

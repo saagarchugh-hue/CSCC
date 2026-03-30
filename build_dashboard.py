@@ -257,6 +257,13 @@ def build_html(data_json: str) -> str:
       box-shadow: 0 16px 48px rgba(15, 23, 42, 0.12);
       max-width: 560px; width: 100%; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column;
     }}
+    .modal.modal-email-drafts {{
+      max-width: min(96vw, 1120px);
+    }}
+    .modal.modal-email-drafts .modal-body {{
+      max-height: calc(85vh - 4.5rem);
+      overflow-y: auto;
+    }}
     .text-muted {{ color: var(--text-muted); }}
     .modal-header {{
       padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);
@@ -270,6 +277,49 @@ def build_html(data_json: str) -> str:
     .email-body {{ white-space: pre-wrap; margin: 0 0 1rem; }}
     .btn-copy {{ padding: 0.4rem 0.75rem; background: var(--accent); color: var(--on-accent); border: none; border-radius: 6px; font-size: 0.8rem; cursor: pointer; }}
     .btn-copy:hover {{ filter: brightness(1.1); }}
+    .email-drafts-hint {{
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin: 0 0 0.75rem;
+      line-height: 1.45;
+    }}
+    .email-drafts-strip {{
+      display: flex;
+      gap: 1rem;
+      overflow-x: auto;
+      padding: 0.25rem 0.25rem 0.75rem;
+      scroll-snap-type: x mandatory;
+      -webkit-overflow-scrolling: touch;
+    }}
+    .email-draft-card {{
+      flex: 0 0 min(360px, 88vw);
+      scroll-snap-align: start;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.1rem;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+      min-height: 220px;
+    }}
+    .email-draft-theme {{
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: var(--accent-dim);
+      line-height: 1.3;
+    }}
+    .email-draft-body {{
+      white-space: pre-wrap;
+      font-size: 0.86rem;
+      line-height: 1.5;
+      flex: 1;
+      color: var(--text);
+    }}
+    .email-draft-card .btn-copy {{
+      align-self: flex-start;
+      margin-top: auto;
+    }}
     .news-list {{ list-style: none; margin: 0; padding: 0; }}
     .news-list li {{ margin-bottom: 0.75rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border); }}
     .news-list li:last-child {{ margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }}
@@ -400,7 +450,7 @@ def build_html(data_json: str) -> str:
     <div class="empty-state" id="empty-state" style="display:none;">No rows match the current filters.</div>
   </div>
   <div class="modal-backdrop" id="modal-email" role="dialog" aria-label="Generated email">
-    <div class="modal">
+    <div class="modal" id="modal-email-panel">
       <div class="modal-header">
         <h2 id="modal-email-title">Reach-out email</h2>
         <button type="button" class="modal-close" aria-label="Close" id="modal-email-close">&times;</button>
@@ -687,9 +737,11 @@ def build_html(data_json: str) -> str:
     const API_BASE = (typeof window !== 'undefined' && window.location && window.location.origin) ? '' : '';
     function apiUrl(path) {{ return API_BASE + path; }}
 
-    function openEmailModal(title, bodyHtml) {{
+    function openEmailModal(title, bodyHtml, wide) {{
+      const panel = document.getElementById('modal-email-panel');
       document.getElementById('modal-email-title').textContent = title;
       document.getElementById('modal-email-body').innerHTML = bodyHtml;
+      if (panel) panel.classList.toggle('modal-email-drafts', !!wide);
       document.getElementById('modal-email').classList.add('open');
     }}
     function openNewsModal(title, bodyHtml) {{
@@ -697,12 +749,37 @@ def build_html(data_json: str) -> str:
       document.getElementById('modal-news-body').innerHTML = bodyHtml;
       document.getElementById('modal-news').classList.add('open');
     }}
-    function closeEmailModal() {{ document.getElementById('modal-email').classList.remove('open'); }}
+    function closeEmailModal() {{
+      document.getElementById('modal-email').classList.remove('open');
+      const panel = document.getElementById('modal-email-panel');
+      if (panel) panel.classList.remove('modal-email-drafts');
+    }}
     function closeNewsModal() {{ document.getElementById('modal-news').classList.remove('open'); }}
     document.getElementById('modal-email-close').addEventListener('click', closeEmailModal);
     document.getElementById('modal-news-close').addEventListener('click', closeNewsModal);
     document.getElementById('modal-email').addEventListener('click', e => {{ if (e.target.id === 'modal-email') closeEmailModal(); }});
     document.getElementById('modal-news').addEventListener('click', e => {{ if (e.target.id === 'modal-news') closeNewsModal(); }});
+
+    async function fetchNewsDataForEmail(row) {{
+      const params = new URLSearchParams({{ merchant: row.merchant }});
+      const le = (row.legal_entity && String(row.legal_entity).trim()) ? String(row.legal_entity).trim() : '';
+      if (le) params.set('legal_entity', le);
+      try {{
+        const res = await fetch(apiUrl('/api/news?' + params.toString()));
+        const data = await res.json().catch(() => ({{}}));
+        if (!res.ok) {{
+          return {{ summary: '', articles: [], source: '', ok: false, err: data.error || 'News request failed' }};
+        }}
+        return {{
+          ok: true,
+          summary: data.summary || '',
+          articles: Array.isArray(data.articles) ? data.articles : [],
+          source: data.source || '',
+        }};
+      }} catch (e) {{
+        return {{ summary: '', articles: [], source: '', ok: false, err: e.message || 'Network error' }};
+      }}
+    }}
 
     async function onGenerateEmail(ev) {{
       const idx = parseInt(ev.target.getAttribute('data-idx'), 10);
@@ -711,27 +788,58 @@ def build_html(data_json: str) -> str:
       const btn = ev.target;
       btn.disabled = true;
       btn.textContent = 'Generating…';
-      const body = document.getElementById('modal-email-body');
-      openEmailModal('Reach-out email – ' + escape(row.merchant), '<div class="modal-body loading">Calling API…</div>');
       const bodyEl = document.getElementById('modal-email-body');
+      openEmailModal('Email drafts – ' + row.merchant, '<div class="modal-body loading">Fetching merchant intel (same source as Latest news)…</div>', true);
       try {{
+        const news = await fetchNewsDataForEmail(row);
+        bodyEl.innerHTML = '<div class="modal-body loading">Writing themed draft options…</div>';
+        const payload = Object.assign({{}}, row, {{
+          news_summary: news.summary || '',
+          news_articles: news.articles || [],
+          news_source: news.source || '',
+        }});
         const res = await fetch(apiUrl('/api/generate-email'), {{
           method: 'POST',
           headers: {{ 'Content-Type': 'application/json' }},
-          body: JSON.stringify(row)
+          body: JSON.stringify(payload)
         }});
         const data = await res.json().catch(() => ({{}}));
         if (!res.ok) {{
           bodyEl.innerHTML = '<p class="api-error">' + escape(data.error || 'Request failed') + '</p>';
           return;
         }}
-        const email = data.email || '';
-        bodyEl.innerHTML = '<div class="email-body">' + escape(email) + '</div><button type="button" class="btn-copy" id="btn-copy-email">Copy to clipboard</button>';
-        document.getElementById('btn-copy-email').addEventListener('click', () => {{
-          navigator.clipboard.writeText(email);
-          const b = document.getElementById('btn-copy-email');
-          b.textContent = 'Copied!';
-          setTimeout(() => b.textContent = 'Copy to clipboard', 2000);
+        const drafts = data.drafts || [];
+        if (!drafts.length) {{
+          bodyEl.innerHTML = '<p class="api-error">No drafts returned. Try again or check OPENAI_API_KEY.</p>';
+          return;
+        }}
+        const newsUsed = !!data.news_used;
+        let note = newsUsed
+          ? ' Drafts use the same live intel as <strong>Latest news</strong> (summary, competitive context, and CSM next steps when the brief includes them).'
+          : ' No news brief was returned (configure news API keys or try again). Drafts use <strong>merchant row context only</strong>.';
+        if (!news.ok && news.err) {{
+          note += ' <span class="text-muted">(News step: ' + escape(news.err) + ')</span>';
+        }}
+        let html = '<p class="email-drafts-hint"><strong>Swipe or scroll sideways</strong> to compare themes. ' + note + '</p>';
+        html += '<div class="email-drafts-strip">';
+        drafts.forEach((d, i) => {{
+          html += '<article class="email-draft-card">';
+          html += '<div class="email-draft-theme">' + escape(d.theme || 'Draft ' + (i + 1)) + '</div>';
+          html += '<div class="email-draft-body">' + escape(d.body || '') + '</div>';
+          html += '<button type="button" class="btn-copy btn-copy-draft" data-draft-i="' + i + '">Copy this draft</button>';
+          html += '</article>';
+        }});
+        html += '</div>';
+        bodyEl.innerHTML = html;
+        const bodies = drafts.map(x => x.body || '');
+        bodyEl.querySelectorAll('.btn-copy-draft').forEach(b => {{
+          b.addEventListener('click', () => {{
+            const i = parseInt(b.getAttribute('data-draft-i'), 10);
+            const text = bodies[i] || '';
+            navigator.clipboard.writeText(text);
+            b.textContent = 'Copied!';
+            setTimeout(() => {{ b.textContent = 'Copy this draft'; }}, 2000);
+          }});
         }});
       }} catch (e) {{
         bodyEl.innerHTML = '<p class="api-error">' + escape(e.message || 'Network error. Run the Flask server for AI features.') + '</p>';

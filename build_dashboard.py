@@ -593,7 +593,7 @@ def build_html(data_json: str) -> str:
       if (col.key === 'status') return '<td class="editable-wrap">' + statusSelectHtml(r) + '</td>';
       if (col.key === 'next_action') return '<td class="editable-wrap">' + nextActionInputHtml(r) + '</td>';
       if (col.key === 'actions') {{
-        return '<td><div class="btn-row"><button type="button" class="btn-action primary btn-email" data-idx="' + idx + '">Generate email</button><button type="button" class="btn-action btn-news" data-idx="' + idx + '">Latest news</button></div></td>';
+        return '<td><div class="btn-row"><button type="button" class="btn-action btn-news" data-idx="' + idx + '">Latest news</button><button type="button" class="btn-action primary btn-email" data-idx="' + idx + '">Generate email</button></div></td>';
       }}
       if (col.key === 'leadership_flag') {{
         const lf = escape(r.leadership_flag);

@@ -1,0 +1,18 @@
+PROMPT 2 — PERSONA PROBLEMS
+
+I am speaking with this persona at the company.
+
+Company: {{company_name}}
+Target persona: {{target_persona}}
+Company strategy summary: {{strategy_summary}}
+Known partners / current tools: {{known_partners}}
+
+Identify the top 8–10 problems or friction points this persona is likely facing today that make it difficult to achieve those objectives.
+
+Requirements:
+- Be specific to the role, not generic business challenges
+- Tie each problem directly to revenue, cost, risk, or productivity goals
+- Include what is happening operationally, why it is hard to solve, and how it impacts business outcomes
+- If relevant, incorporate channel, financing, merchandising, conversion, attachment, approval, or workflow friction
+
+Return as a table.

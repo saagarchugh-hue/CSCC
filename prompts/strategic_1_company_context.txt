@@ -1,0 +1,20 @@
+PROMPT 1 — COMPANY CONTEXT
+
+I am an Account Manager preparing for a strategic conversation.
+
+Company: {{company_name}}
+Industry: {{industry}}
+Business model: {{business_model}}
+Key products/services: {{products_services}}
+Geography: {{geography}}
+Known partners: {{known_partners}}
+Target persona: {{target_persona}}
+
+Please provide:
+1. Current CEO, CFO, and relevant functional leaders for this persona
+2. Most recent public statements, interviews, earnings commentary, articles, or executive comments from the last 12–18 months about strategic priorities
+3. A summary of likely strategic objectives across revenue growth, cost reduction, risk reduction, and productivity/efficiency
+4. Key growth levers they are investing in
+5. Known constraints such as competition, regulation, seasonality, channel conflict, consumer demand softness, financing limitations, or operational bottlenecks
+
+Return in a fact table with citations and clearly separate fact from inference.

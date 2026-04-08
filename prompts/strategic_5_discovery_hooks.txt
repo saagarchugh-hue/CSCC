@@ -1,0 +1,17 @@
+PROMPT 5 — DISCOVERY HOOKS
+
+Based on the company strategy, persona problems, current-state approach, and cost of inaction, generate:
+
+1. 5–7 sharp insights that would resonate with this persona
+2. 6–8 discovery questions designed to get them to acknowledge these problems themselves
+3. 3 concise reframes that challenge status quo thinking without pitching a product
+4. 3 call-opening hypotheses I can test live
+
+Company: {{company_name}}
+Target persona: {{target_persona}}
+Strategy summary: {{strategy_summary}}
+Problems summary: {{problems_summary}}
+Current-state summary: {{current_state_summary}}
+Cost of inaction summary: {{cost_of_inaction_summary}}
+
+Keep it natural, commercial, and non-generic.

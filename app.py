@@ -3,17 +3,20 @@ Flask server for the Merchant Success Command Center dashboard.
 Serves the dashboard and provides AI-backed API endpoints:
   - POST /api/generate-email — generate multiple themed email drafts (uses merchant context + optional news intel from the client)
   - GET  /api/news?merchant=... — fetch latest news about the merchant
+  - POST /api/strategic-brief — six-step strategic prep + action summary (intake JSON; Gemini or OpenAI)
 
-Set environment variables:
-  OPENAI_API_KEY — used for both "Generate email" and "Latest news" (one key for both)
-  OPENAI_NEWS_MODEL — optional; model for news via Responses API + web_search (default: gpt-4o)
-  GEMINI_API_KEY — optional; alternative for "Latest news" (Gemini + Google Search)
-  NEWS_API_KEY   — optional; fallback for "Latest news"
-  SERPER_API_KEY — optional; fallback for "Latest news"
-  GOOGLE_SHEET_ID — optional; spreadsheet ID for live data (see HOSTING.md)
-  GOOGLE_SHEET_GID — optional; sheet/tab gid (default 0)
+Secrets (pick one):
+  • **Local:** put secrets in `.env` and/or `Keys.env` next to `app.py` (see `.env.example`). Both are gitignored; `Keys.env` overrides `.env` when both exist.
+  • **Shell / hosting:** set the same names as environment variables.
+  • **Prompts:** optional `prompts/*.txt` templates (`email_drafts`, `news_openai`, `news_gemini`, `strategic_1`…`strategic_7`). Placeholders are `{{name}}`. Override directory with `CSCC_PROMPTS_DIR`.
 
-Run: flask run --host=0.0.0.0  (or: python app.py)
+  OPENAI_API_KEY — email drafts + OpenAI news fallback + strategic brief (OpenAI path)
+  GEMINI_API_KEY — preferred for "Latest news" (Gemini + Google Search) + strategic brief (Gemini path)
+  OPENAI_NEWS_MODEL, OPENAI_EMAIL_MODEL, GEMINI_NEWS_MODEL — optional overrides
+  NEWS_API_KEY, SERPER_API_KEY — optional news fallbacks
+  GOOGLE_SHEET_ID, GOOGLE_SHEET_GID — optional live sheet (see HOSTING.md)
+
+Run: python app.py  (or: flask run --host=0.0.0.0)
 Then open http://<this-machine-ip>:5000 for team access.
 """
 import csv
@@ -31,6 +34,38 @@ app = Flask(__name__, static_folder=".", static_url_path="")
 # Paths
 ROOT = Path(__file__).resolve().parent
 DASHBOARD_HTML = ROOT / "dashboard.html"
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env")
+    # Optional: Keys.env (same variable names; loaded second so it overrides .env)
+    load_dotenv(ROOT / "Keys.env", override=True)
+except ImportError:
+    pass
+
+
+def _prompts_dir() -> Path:
+    d = os.environ.get("CSCC_PROMPTS_DIR", "").strip()
+    if d:
+        return Path(d).expanduser()
+    return ROOT / "prompts"
+
+
+def render_prompt_file(name: str, **kwargs: str) -> str:
+    """
+    Load prompts/<name>.txt and replace {{key}} placeholders with kwargs values.
+    Use for Generate email, Latest news (Gemini / OpenAI), so copy can be edited without changing Python.
+    """
+    path = _prompts_dir() / f"{name}.txt"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Prompt file missing: {path}. Add it or set CSCC_PROMPTS_DIR to a folder containing {name}.txt"
+        )
+    text = path.read_text(encoding="utf-8")
+    for key, value in kwargs.items():
+        text = text.replace("{{" + key + "}}", str(value))
+    return text
 
 
 def get_openai_client():
@@ -120,6 +155,7 @@ def read_merchants_from_google_sheet(sheet_id: str, gid: str = "0"):
 # User-facing messages when deployed without API keys (no env vars set)
 MSG_EMAIL_NOT_CONFIGURED = "Email generation is not configured for this deployment. Add OPENAI_API_KEY to enable it."
 MSG_NEWS_NOT_CONFIGURED = "Latest news is not configured for this deployment. Add OPENAI_API_KEY (or GEMINI_API_KEY, NEWS_API_KEY, SERPER_API_KEY) in Railway Variables and redeploy."
+MSG_STRATEGIC_NOT_CONFIGURED = "Strategic brief is not configured. Add GEMINI_API_KEY or OPENAI_API_KEY."
 
 
 def _format_articles_for_prompt(articles: list | None) -> str:
@@ -199,34 +235,20 @@ def generate_email_drafts_via_openai(payload: dict) -> tuple[list[dict] | None, 
 {headlines_block}
 """
 
-    prompt = f"""You help Affirm Client Success managers write **short outreach emails** to merchant contacts. Produce **multiple distinct draft emails** they can send, each with a different **theme / angle**.
-
-How Affirm works with merchants (weave in naturally, no jargon dump):
-- **Financing programs** (BNPL, etc.) to **lift conversion and order value**, especially in **seasonal peaks**.
-- **Competitive and historical performance data** so merchants can **iterate** on placement, messaging, and promos.
-
-**Merchant row**
-- Merchant: {merchant}
-- Vertical: {vertical}. Tier: {tier}.
-- Engagement month: {engagement_month}. Phase: {engagement_type}.
-- Peak months: {peak_months}. Playbook: {playbook}.
-- Dashboard next action: {next_action}. CSM (sign only if natural): {owner}.
-{gmv_line}
-{intel_block}
-
-**Your task**
-Return **only** valid JSON (no markdown fences) with this shape:
-{{
-  "drafts": [
-    {{"theme": "Short label, 4–10 words", "body": "Email body only: 3–6 sentences. No subject line. No signature block."}}
-  ]
-}}
-
-Rules:
-- Include **at least 4** drafts, at most 6. Each **theme** must be clearly different (e.g. reacting to **recent news or industry context**, doubling down on **CSM action items / recommendations** from the intel brief, **peak-season financing readiness**, **benchmarks / prior-season learning / program optimization**, **relationship / planning check-in**).
-- **At least two** drafts must **explicitly** reference something concrete from the intelligence brief (news, risk, competitor, or a **recommended CSM step**)—if the brief is empty, say you’re reaching out for planning without fabricating news.
-- Do not invent numbers, deals, or events not supported by the brief or merchant row. Keep tone professional and warm.
-- Do not include a subject line or “Best,” signatures in **body**—the CSM will paste into their client."""
+    prompt = render_prompt_file(
+        "email_drafts",
+        merchant=merchant,
+        vertical=vertical,
+        tier=tier,
+        engagement_month=engagement_month,
+        engagement_type=engagement_type,
+        peak_months=peak_months,
+        playbook=playbook,
+        next_action=next_action,
+        owner=owner,
+        gmv_line=gmv_line,
+        intel_block=intel_block,
+    )
 
     model = os.environ.get("OPENAI_EMAIL_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
     try:
@@ -308,29 +330,11 @@ def fetch_news_openai(merchant_name: str, limit: int = 8, legal_entity: str = ""
         if le
         else "Infer the registered legal entity or parent company behind the consumer-facing brand when possible.\n"
     )
-    prompt = f"""You are a commercial intelligence assistant for Affirm's merchant success team. **Use web search** for current, verifiable information (prioritize the last 12–24 months).
-
-**Merchant (operating brand):** {merchant_name}
-{legal_block}
-
-Answer in **Markdown** with these sections:
-
-### 1. Executive summary
-2–3 sentences on what matters most for this merchant right now for a BNPL partner.
-
-### 2. Legal entity & corporate context
-Parent company, legal name, public ticker if any (only if found via search).
-
-### 3. Recent news & developments
-Product, partnerships, leadership, funding, M&A, earnings, regulatory — with approximate dates where available.
-
-### 4. Competitive & industry landscape
-Competitors, category trends, external risks relevant to this merchant.
-
-### 5. Actionable next steps for the CSM
-4–6 **specific** bullets for what the CSM should do next with Affirm (timing, co-marketing, risk monitoring, education). Each bullet should be concrete.
-
-If search finds little on the exact brand, say so clearly and still give vertical-relevant actions. Do not invent facts; cite what you found on the web."""
+    prompt = render_prompt_file(
+        "news_openai",
+        merchant_name=merchant_name,
+        legal_block=legal_block,
+    )
 
     model = os.environ.get("OPENAI_NEWS_MODEL", "gpt-4o").strip() or "gpt-4o"
     tools = [{"type": "web_search", "external_web_access": True}]
@@ -460,32 +464,12 @@ def fetch_news_gemini(merchant_name: str, limit: int = 8, legal_entity: str = ""
         if le
         else "Use Google Search to infer the registered legal entity / parent company behind the storefront brand when possible.\n"
     )
-    prompt = f"""You are a commercial intelligence assistant for Affirm’s merchant success team. **Use Google Search** for CURRENT, verifiable information (prioritize the last 12–24 months).
-
-**Merchant (operating brand):** {merchant_name}
-{legal_block}
-
-Produce a structured answer in **Markdown** with these sections:
-
-### 1. Executive summary
-2–3 sentences on what matters most for this merchant *right now* for a BNPL partner.
-
-### 2. Legal entity & corporate context
-Parent company, legal name, public ticker if any, and relationship to the consumer-facing brand (only if found in search).
-
-### 3. Recent news & developments
-Product, partnerships, leadership, funding, M&A, earnings, regulatory — with approximate dates where available.
-
-### 4. Competitive & industry landscape
-Main competitors, category trends, and external risks (regulatory, macro, reputation) that could affect the merchant or financing programs.
-
-### 5. Actionable next steps for the CSM
-4–6 **specific** bullets: what the CSM should do next with Affirm (e.g. promo timing, co-marketing, risk monitoring, merchant education). Each bullet should be concrete and justified by context above.
-
-If search finds little on the exact brand, say so clearly and still give vertical-relevant actions. Do not invent facts; distinguish search-supported facts from general industry practice.
-
-After your Markdown report, on its own line, list up to {limit} **source titles** you relied on from search (for citation transparency).
-"""
+    prompt = render_prompt_file(
+        "news_gemini",
+        merchant_name=merchant_name,
+        legal_block=legal_block,
+        limit=str(limit),
+    )
     try:
         response = client.models.generate_content(
             model=os.environ.get("GEMINI_NEWS_MODEL", "gemini-2.0-flash"),
@@ -526,6 +510,291 @@ After your Markdown report, on its own line, list up to {limit} **source titles*
 
     # If no chunks, still return summary so the UI can show it
     return items, summary, None
+
+
+def _truncate_chain(text: str, max_chars: int = 14000) -> str:
+    t = (text or "").strip()
+    if len(t) <= max_chars:
+        return t
+    return t[: max_chars - 80].rstrip() + "\n\n[…truncated for downstream prompts…]"
+
+
+def _am_optional_block(note: str) -> str:
+    n = (note or "").strip()
+    if not n:
+        return ""
+    return "\n\n---\n**Additional context from the Account Manager:**\n" + n
+
+
+def _gemini_strategic_generate(prompt: str, use_search: bool) -> tuple[str | None, str | None]:
+    key = os.environ.get("GEMINI_API_KEY")
+    if not key:
+        return None, MSG_STRATEGIC_NOT_CONFIGURED
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError:
+        return None, "Install the Gemini SDK: pip install google-genai"
+
+    client = genai.Client(api_key=key)
+    model = os.environ.get("GEMINI_STRATEGIC_MODEL", "gemini-2.0-flash").strip() or "gemini-2.0-flash"
+    if use_search:
+        config = types.GenerateContentConfig(
+            max_output_tokens=8192,
+            tools=[types.Tool(google_search=types.GoogleSearch())],
+        )
+    else:
+        config = types.GenerateContentConfig(max_output_tokens=8192)
+    try:
+        response = client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=config,
+        )
+    except Exception as e:
+        return None, str(e)
+    if not response.candidates:
+        return None, "No response from Gemini"
+    return (response.text or "").strip() or None, None
+
+
+def _openai_strategic_web(prompt: str) -> tuple[str | None, str | None]:
+    """Step 1: Responses API + web_search for current public facts."""
+    client = get_openai_client()
+    if not client:
+        return None, MSG_STRATEGIC_NOT_CONFIGURED
+    if not hasattr(client, "responses") or not hasattr(client.responses, "create"):
+        return None, (
+            "Your OpenAI SDK is too old for Responses API + web search. "
+            "Run: pip install -U 'openai>=1.55.0'"
+        )
+    model = os.environ.get("OPENAI_STRATEGIC_MODEL", "gpt-4o").strip() or "gpt-4o"
+    tools = [{"type": "web_search", "external_web_access": True}]
+
+    def _call(tool_choice):
+        return client.responses.create(
+            model=model,
+            input=prompt,
+            tools=tools,
+            tool_choice=tool_choice,
+            max_output_tokens=8192,
+        )
+
+    try:
+        try:
+            resp = _call("required")
+        except Exception as first:
+            err_s = str(first).lower()
+            if "tool" in err_s or "required" in err_s or "unsupported" in err_s:
+                resp = _call("auto")
+            else:
+                raise
+        summary, _items = _openai_responses_text_and_citations(resp, 20)
+        if not summary:
+            return None, "OpenAI returned an empty response for strategic step 1."
+        return summary.strip(), None
+    except Exception as e:
+        return None, str(e)
+
+
+def _openai_strategic_chat(prompt: str) -> tuple[str | None, str | None]:
+    client = get_openai_client()
+    if not client:
+        return None, MSG_STRATEGIC_NOT_CONFIGURED
+    model = os.environ.get("OPENAI_STRATEGIC_MODEL", "gpt-4o").strip() or "gpt-4o"
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=8192,
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+        return raw or None, None
+    except Exception as e:
+        return None, str(e)
+
+
+def run_strategic_brief(payload: dict) -> dict:
+    """
+    Run prompts strategic_1 … strategic_7. Step 1 uses live web (Gemini Google Search or OpenAI web_search).
+    Returns dict with provider, steps (each id, title, content, error), action_summary, error (top-level if any).
+    """
+    company_name = (payload.get("company_name") or "").strip()
+    if not company_name:
+        return {"error": "Missing company_name", "provider": "", "steps": [], "action_summary": ""}
+
+    industry = (payload.get("industry") or "").strip()
+    business_model = (payload.get("business_model") or "").strip()
+    products_services = (payload.get("products_services") or "").strip()
+    geography = (payload.get("geography") or "").strip()
+    known_partners = (payload.get("known_partners") or "").strip()
+    target_persona = (payload.get("target_persona") or "").strip()
+    additional = (payload.get("additional_context") or "").strip()
+
+    prov = (payload.get("provider") or "").strip().lower()
+    if prov not in ("gemini", "openai", ""):
+        prov = ""
+    if not prov:
+        prov = "gemini" if os.environ.get("GEMINI_API_KEY") else "openai"
+
+    if prov == "gemini" and not os.environ.get("GEMINI_API_KEY"):
+        return {"error": "GEMINI_API_KEY not set (required for provider=gemini).", "provider": prov, "steps": [], "action_summary": ""}
+    if prov == "openai" and not os.environ.get("OPENAI_API_KEY"):
+        return {"error": "OPENAI_API_KEY not set (required for provider=openai).", "provider": prov, "steps": [], "action_summary": ""}
+
+    steps_meta = [
+        ("company_context", "1. Company context"),
+        ("persona_problems", "2. Persona problems"),
+        ("current_state", "3. Current state"),
+        ("cost_of_inaction", "4. Cost of inaction"),
+        ("discovery_hooks", "5. Discovery hooks"),
+        ("partner_reframe", "6. Partner reframe"),
+        ("action_summary", "7. Action summary"),
+    ]
+    steps_out: list[dict] = []
+
+    def add_step(sid: str, title: str, content: str, err: str | None):
+        steps_out.append({"id": sid, "title": title, "content": content or "", "error": err})
+
+    am = _am_optional_block(additional)
+
+    # --- Step 1
+    try:
+        p1 = render_prompt_file(
+            "strategic_1_company_context",
+            company_name=company_name,
+            industry=industry or "—",
+            business_model=business_model or "—",
+            products_services=products_services or "—",
+            geography=geography or "—",
+            known_partners=known_partners or "—",
+            target_persona=target_persona or "—",
+        ) + am
+    except FileNotFoundError as e:
+        return {"error": str(e), "provider": prov, "steps": [], "action_summary": ""}
+
+    if prov == "gemini":
+        s1, e1 = _gemini_strategic_generate(p1, use_search=True)
+    else:
+        s1, e1 = _openai_strategic_web(p1)
+
+    if e1 or not s1:
+        add_step("company_context", steps_meta[0][1], "", e1 or "Empty response")
+        return {"error": None, "provider": prov, "steps": steps_out, "action_summary": ""}
+
+    add_step("company_context", steps_meta[0][1], s1, None)
+    strategy_summary = _truncate_chain(s1)
+
+    # --- Step 2
+    p2 = render_prompt_file(
+        "strategic_2_persona_problems",
+        company_name=company_name,
+        target_persona=target_persona or "—",
+        strategy_summary=strategy_summary,
+        known_partners=known_partners or "—",
+    ) + am
+    if prov == "gemini":
+        s2, e2 = _gemini_strategic_generate(p2, use_search=False)
+    else:
+        s2, e2 = _openai_strategic_chat(p2)
+    if e2 or not s2:
+        add_step("persona_problems", steps_meta[1][1], "", e2 or "Empty response")
+        return {"error": None, "provider": prov, "steps": steps_out, "action_summary": ""}
+    add_step("persona_problems", steps_meta[1][1], s2, None)
+    problems_summary = _truncate_chain(s2)
+
+    # --- Step 3
+    p3 = render_prompt_file(
+        "strategic_3_current_state",
+        company_name=company_name,
+        target_persona=target_persona or "—",
+        known_partners=known_partners or "—",
+        problems_summary=problems_summary,
+    ) + am
+    if prov == "gemini":
+        s3, e3 = _gemini_strategic_generate(p3, use_search=False)
+    else:
+        s3, e3 = _openai_strategic_chat(p3)
+    if e3 or not s3:
+        add_step("current_state", steps_meta[2][1], "", e3 or "Empty response")
+        return {"error": None, "provider": prov, "steps": steps_out, "action_summary": ""}
+    add_step("current_state", steps_meta[2][1], s3, None)
+    current_state_summary = _truncate_chain(s3)
+
+    # --- Step 4
+    p4 = render_prompt_file(
+        "strategic_4_cost_of_inaction",
+        company_name=company_name,
+        target_persona=target_persona or "—",
+        current_state_summary=current_state_summary,
+        strategy_summary=strategy_summary,
+        known_partners=known_partners or "—",
+    ) + am
+    if prov == "gemini":
+        s4, e4 = _gemini_strategic_generate(p4, use_search=False)
+    else:
+        s4, e4 = _openai_strategic_chat(p4)
+    if e4 or not s4:
+        add_step("cost_of_inaction", steps_meta[3][1], "", e4 or "Empty response")
+        return {"error": None, "provider": prov, "steps": steps_out, "action_summary": ""}
+    add_step("cost_of_inaction", steps_meta[3][1], s4, None)
+    cost_of_inaction_summary = _truncate_chain(s4)
+
+    # --- Step 5
+    p5 = render_prompt_file(
+        "strategic_5_discovery_hooks",
+        company_name=company_name,
+        target_persona=target_persona or "—",
+        strategy_summary=strategy_summary,
+        problems_summary=problems_summary,
+        current_state_summary=current_state_summary,
+        cost_of_inaction_summary=cost_of_inaction_summary,
+    ) + am
+    if prov == "gemini":
+        s5, e5 = _gemini_strategic_generate(p5, use_search=False)
+    else:
+        s5, e5 = _openai_strategic_chat(p5)
+    if e5 or not s5:
+        add_step("discovery_hooks", steps_meta[4][1], "", e5 or "Empty response")
+        return {"error": None, "provider": prov, "steps": steps_out, "action_summary": ""}
+    add_step("discovery_hooks", steps_meta[4][1], s5, None)
+
+    # --- Step 6
+    p6 = render_prompt_file(
+        "strategic_6_partner_reframe",
+        known_partners=known_partners or "—",
+        strategy_summary=strategy_summary,
+        cost_of_inaction_summary=cost_of_inaction_summary,
+    ) + am
+    if prov == "gemini":
+        s6, e6 = _gemini_strategic_generate(p6, use_search=False)
+    else:
+        s6, e6 = _openai_strategic_chat(p6)
+    if e6 or not s6:
+        add_step("partner_reframe", steps_meta[5][1], "", e6 or "Empty response")
+        return {"error": None, "provider": prov, "steps": steps_out, "action_summary": ""}
+    add_step("partner_reframe", steps_meta[5][1], s6, None)
+
+    # --- Step 7 (synthesis)
+    p7 = render_prompt_file(
+        "strategic_7_action_summary",
+        s1=_truncate_chain(s1, 6000),
+        s2=_truncate_chain(s2, 6000),
+        s3=_truncate_chain(s3, 6000),
+        s4=_truncate_chain(s4, 6000),
+        s5=_truncate_chain(s5, 6000),
+        s6=_truncate_chain(s6, 6000),
+    )
+    if prov == "gemini":
+        s7, e7 = _gemini_strategic_generate(p7, use_search=False)
+    else:
+        s7, e7 = _openai_strategic_chat(p7)
+    if e7 or not s7:
+        add_step("action_summary", steps_meta[6][1], "", e7 or "Empty response")
+        return {"error": None, "provider": prov, "steps": steps_out, "action_summary": ""}
+    add_step("action_summary", steps_meta[6][1], s7, None)
+
+    return {"error": None, "provider": prov, "steps": steps_out, "action_summary": s7 or ""}
 
 
 def _load_rows_from_csv_full():
@@ -657,6 +926,21 @@ def api_news():
             return jsonify({"error": err}), 500
 
     return jsonify({"error": MSG_NEWS_NOT_CONFIGURED}), 400
+
+
+@app.route("/api/strategic-brief", methods=["POST"])
+def api_strategic_brief():
+    try:
+        payload = request.get_json() or {}
+    except Exception:
+        payload = {}
+    out = run_strategic_brief(payload)
+    err = out.get("error")
+    if err:
+        low = err.lower()
+        code = 400 if "missing" in low or "not set" in low or "requires" in low else 500
+        return jsonify(out), code
+    return jsonify(out)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,25 @@
+PROMPT 6 — EXISTING PARTNER REFRAME
+
+The company currently uses the following financing or payment partners:
+{{known_partners}}
+
+Context — strategy summary:
+{{strategy_summary}}
+
+Context — cost of inaction (from prior analysis):
+{{cost_of_inaction_summary}}
+
+Re-evaluate:
+1. How this existing solution shapes their current behavior
+2. Where it helps vs. where it creates constraints
+3. How it impacts:
+   - Revenue consistency
+   - Customer behavior
+   - Sales team behavior
+   - Operational complexity
+
+Then refine the Cost of Inaction to reflect a world where:
+- A solution already exists
+- But it is limited, intermittent, channel-specific, or behaviorally constraining
+
+Focus on subtle limitations, not obvious gaps.

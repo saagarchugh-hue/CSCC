@@ -1,0 +1,22 @@
+PROMPT 4 — COST OF INACTION
+
+Define the Cost of Inaction for this company and persona.
+
+Company: {{company_name}}
+Target persona: {{target_persona}}
+Current approach: {{current_state_summary}}
+Strategy summary: {{strategy_summary}}
+Known partners / current tools: {{known_partners}}
+
+Important:
+- Do not reference any proposed solution
+- Do not frame this as opportunity cost
+- Focus only on the hidden or underappreciated consequences of continuing the current approach
+
+For each area of revenue, cost, risk, and productivity, identify:
+- What they believe is working today
+- The hidden cost of that belief
+- Why this undermines strategic objectives
+- The likely behavioral and structural consequences if nothing changes
+
+Return as a structured table.

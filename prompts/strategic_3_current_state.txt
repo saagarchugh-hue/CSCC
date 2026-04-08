@@ -1,0 +1,18 @@
+PROMPT 3 — CURRENT STATE
+
+For each identified problem, explain how this company and persona are likely addressing it today without introducing any new external solution.
+
+Company: {{company_name}}
+Target persona: {{target_persona}}
+Known partners / current tools: {{known_partners}}
+Problems identified: {{problems_summary}}
+
+For each problem include:
+- What the current approach looks like in practice
+- Why it is attractive
+- Where it falls short
+- Why the company continues to use it
+
+If they have a partner such as {{known_partners}}, incorporate that into the analysis.
+
+Return as a table and keep the analysis grounded and realistic.

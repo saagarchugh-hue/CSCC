@@ -264,6 +264,73 @@ def build_html(data_json: str) -> str:
       max-height: calc(85vh - 4.5rem);
       overflow-y: auto;
     }}
+    .modal.modal-strategic {{
+      max-width: min(96vw, 920px);
+      width: 100%;
+      max-height: 90vh;
+    }}
+    .modal.modal-strategic .modal-body {{
+      max-height: calc(90vh - 4.5rem);
+      overflow-y: auto;
+    }}
+    .strategic-form-grid {{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.65rem 1rem;
+      margin-bottom: 1rem;
+    }}
+    @media (max-width: 640px) {{ .strategic-form-grid {{ grid-template-columns: 1fr; }} }}
+    .strategic-form-grid label {{
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-muted);
+    }}
+    .strategic-form-grid input, .strategic-form-grid textarea, .strategic-form-grid select {{
+      padding: 0.45rem 0.55rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 0.85rem;
+      background: var(--surface);
+      color: var(--text);
+    }}
+    .strategic-form-grid textarea {{ min-height: 3.5rem; resize: vertical; }}
+    .strategic-form-grid .full {{ grid-column: 1 / -1; }}
+    .strategic-run-row {{ display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.5rem; }}
+    .strategic-tabs {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-bottom: 0.75rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.5rem;
+    }}
+    .strategic-tab {{
+      padding: 0.35rem 0.65rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+      font-size: 0.78rem;
+      font-family: inherit;
+      cursor: pointer;
+      color: var(--text);
+    }}
+    .strategic-tab:hover {{ background: var(--surface-hover); }}
+    .strategic-tab.active {{
+      background: var(--accent);
+      color: var(--on-accent);
+      border-color: var(--accent-dim);
+    }}
+    .strategic-panel {{ display: none; font-size: 0.88rem; line-height: 1.5; }}
+    .strategic-panel.active {{ display: block; }}
+    .strategic-panel.markdown-body h2 {{ font-size: 1rem; margin: 0.75rem 0 0.5rem; }}
+    .strategic-panel.markdown-body h3 {{ font-size: 0.95rem; margin: 0.65rem 0 0.4rem; }}
+    .strategic-panel.markdown-body ul {{ margin: 0.35rem 0 0.65rem 1.1rem; }}
+    .strategic-panel.markdown-body p {{ margin: 0 0 0.5rem; }}
+    .strategic-provider-note {{ font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.5rem; }}
     .text-muted {{ color: var(--text-muted); }}
     .modal-header {{
       padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);
@@ -467,6 +534,41 @@ def build_html(data_json: str) -> str:
       <div class="modal-body" id="modal-news-body"></div>
     </div>
   </div>
+  <div class="modal-backdrop" id="modal-strategic" role="dialog" aria-label="Strategic brief">
+    <div class="modal modal-strategic">
+      <div class="modal-header">
+        <h2 id="modal-strategic-title">Strategic brief</h2>
+        <button type="button" class="modal-close" aria-label="Close" id="modal-strategic-close">&times;</button>
+      </div>
+      <div class="modal-body" id="modal-strategic-body">
+        <p class="strategic-provider-note">Optional: fill context before running. Step 1 uses live web research; later steps build on prior outputs.</p>
+        <div id="strategic-form-wrap">
+          <div class="strategic-form-grid">
+            <label class="full">Company name <input type="text" id="strategic-company" autocomplete="organization" /></label>
+            <label>Industry <input type="text" id="strategic-industry" /></label>
+            <label>Business model <input type="text" id="strategic-business-model" placeholder="e.g. DTC, marketplace" /></label>
+            <label class="full">Key products / services <textarea id="strategic-products" rows="2"></textarea></label>
+            <label>Geography <input type="text" id="strategic-geo" /></label>
+            <label>Target persona <input type="text" id="strategic-persona" placeholder="e.g. VP E‑commerce" /></label>
+            <label class="full">Known partners / tools <textarea id="strategic-partners" rows="2" placeholder="Financing, payments, stack"></textarea></label>
+            <label class="full">Additional context <textarea id="strategic-extra" rows="2" placeholder="Goals, constraints, meeting context"></textarea></label>
+            <label>AI provider
+              <select id="strategic-provider">
+                <option value="">Auto (Gemini if configured)</option>
+                <option value="gemini">Gemini (web on step 1)</option>
+                <option value="openai">OpenAI (web on step 1)</option>
+              </select>
+            </label>
+          </div>
+          <div class="strategic-run-row">
+            <button type="button" class="btn-action primary" id="strategic-run-btn">Run strategic brief</button>
+            <span class="text-muted" id="strategic-status"></span>
+          </div>
+        </div>
+        <div id="strategic-result-wrap" style="display:none;"></div>
+      </div>
+    </div>
+  </div>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script>
     let RAW = {data_escaped};
@@ -593,7 +695,7 @@ def build_html(data_json: str) -> str:
       if (col.key === 'status') return '<td class="editable-wrap">' + statusSelectHtml(r) + '</td>';
       if (col.key === 'next_action') return '<td class="editable-wrap">' + nextActionInputHtml(r) + '</td>';
       if (col.key === 'actions') {{
-        return '<td><div class="btn-row"><button type="button" class="btn-action btn-news" data-idx="' + idx + '">Latest news</button><button type="button" class="btn-action primary btn-email" data-idx="' + idx + '">Generate email</button></div></td>';
+        return '<td><div class="btn-row"><button type="button" class="btn-action btn-news" data-idx="' + idx + '">Latest news</button><button type="button" class="btn-action btn-strategic" data-idx="' + idx + '">Strategic brief</button><button type="button" class="btn-action primary btn-email" data-idx="' + idx + '">Generate email</button></div></td>';
       }}
       if (col.key === 'leadership_flag') {{
         const lf = escape(r.leadership_flag);
@@ -708,6 +810,7 @@ def build_html(data_json: str) -> str:
       }});
       tbody.querySelectorAll('.btn-email').forEach(btn => btn.addEventListener('click', onGenerateEmail));
       tbody.querySelectorAll('.btn-news').forEach(btn => btn.addEventListener('click', onLatestNews));
+      tbody.querySelectorAll('.btn-strategic').forEach(btn => btn.addEventListener('click', onStrategicBrief));
       bindEditableCells();
       updateSortIndicator();
     }}
@@ -759,6 +862,139 @@ def build_html(data_json: str) -> str:
     document.getElementById('modal-news-close').addEventListener('click', closeNewsModal);
     document.getElementById('modal-email').addEventListener('click', e => {{ if (e.target.id === 'modal-email') closeEmailModal(); }});
     document.getElementById('modal-news').addEventListener('click', e => {{ if (e.target.id === 'modal-news') closeNewsModal(); }});
+    function closeStrategicModal() {{
+      document.getElementById('modal-strategic').classList.remove('open');
+    }}
+    document.getElementById('modal-strategic-close').addEventListener('click', closeStrategicModal);
+    document.getElementById('modal-strategic').addEventListener('click', e => {{ if (e.target.id === 'modal-strategic') closeStrategicModal(); }});
+
+    function fillStrategicFormFromRow(row) {{
+      document.getElementById('strategic-company').value = row.merchant || '';
+      document.getElementById('strategic-industry').value = row.vertical || '';
+      document.getElementById('strategic-business-model').value = '';
+      document.getElementById('strategic-products').value = '';
+      document.getElementById('strategic-geo').value = '';
+      document.getElementById('strategic-persona').value = '';
+      document.getElementById('strategic-partners').value = '';
+      document.getElementById('strategic-extra').value = '';
+      document.getElementById('strategic-provider').value = '';
+      document.getElementById('strategic-result-wrap').style.display = 'none';
+      document.getElementById('strategic-form-wrap').style.display = 'block';
+      document.getElementById('strategic-status').textContent = '';
+      document.getElementById('strategic-result-wrap').innerHTML = '';
+    }}
+
+    function renderMarkdownBlock(raw) {{
+      const t = raw || '';
+      if (typeof marked !== 'undefined' && (t.indexOf('#') >= 0 || t.indexOf('**') >= 0 || t.indexOf('|') >= 0))
+        return marked.parse(t);
+      return '<p>' + escape(t).replace(/\\n/g, '<br>') + '</p>';
+    }}
+
+    function renderStrategicResults(data) {{
+      const wrap = document.getElementById('strategic-result-wrap');
+      const steps = data.steps || [];
+      const actionSummary = data.action_summary || '';
+      const prov = data.provider || '';
+      const provLabel = prov === 'gemini' ? 'Gemini' : prov === 'openai' ? 'OpenAI' : prov;
+      const tabOrder = ['action_summary', 'company_context', 'persona_problems', 'current_state', 'cost_of_inaction', 'discovery_hooks', 'partner_reframe'];
+      const tabs = [];
+      tabOrder.forEach(id => {{
+        const st = steps.find(s => s.id === id);
+        if (!st) return;
+        let label = (st.title || id).replace(/^\\d+\\.\\s*/, '');
+        if (id === 'action_summary') label = 'Action summary';
+        const inner = st.error
+          ? '<p class="api-error">' + escape(st.error) + '</p>'
+          : renderMarkdownBlock(id === 'action_summary' && !(st.content || '').trim() ? actionSummary : st.content);
+        tabs.push({{ id: id, label: label, html: inner }});
+      }});
+      let h = '<p class="strategic-provider-note">Provider: <strong>' + escape(provLabel || '—') + '</strong></p>';
+      h += '<div class="strategic-tabs">';
+      tabs.forEach((t, i) => {{
+        h += '<button type="button" class="strategic-tab' + (i === 0 ? ' active' : '') + '" data-strategic-tab="' + escape(t.id) + '">' + escape(t.label) + '</button>';
+      }});
+      h += '</div><div class="strategic-panels">';
+      tabs.forEach((t, i) => {{
+        h += '<div class="strategic-panel markdown-body' + (i === 0 ? ' active' : '') + '" data-strategic-panel="' + escape(t.id) + '">' + t.html + '</div>';
+      }});
+      h += '</div><div class="strategic-run-row" style="margin-top:1rem"><button type="button" class="btn-action" id="strategic-edit-inputs">Edit inputs</button></div>';
+      wrap.innerHTML = h;
+      wrap.style.display = 'block';
+      document.getElementById('strategic-form-wrap').style.display = 'none';
+      wrap.querySelectorAll('.strategic-tab').forEach(btn => {{
+        btn.addEventListener('click', () => {{
+          const id = btn.getAttribute('data-strategic-tab');
+          wrap.querySelectorAll('.strategic-tab').forEach(b => b.classList.remove('active'));
+          wrap.querySelectorAll('.strategic-panel').forEach(p => p.classList.remove('active'));
+          btn.classList.add('active');
+          const panel = wrap.querySelector('.strategic-panel[data-strategic-panel="' + id + '"]');
+          if (panel) panel.classList.add('active');
+        }});
+      }});
+      const editBtn = document.getElementById('strategic-edit-inputs');
+      if (editBtn) editBtn.addEventListener('click', () => {{
+        wrap.style.display = 'none';
+        document.getElementById('strategic-form-wrap').style.display = 'block';
+      }});
+    }}
+
+    document.getElementById('strategic-run-btn').addEventListener('click', async () => {{
+      const btn = document.getElementById('strategic-run-btn');
+      const status = document.getElementById('strategic-status');
+      const payload = {{
+        company_name: document.getElementById('strategic-company').value.trim(),
+        industry: document.getElementById('strategic-industry').value.trim(),
+        business_model: document.getElementById('strategic-business-model').value.trim(),
+        products_services: document.getElementById('strategic-products').value.trim(),
+        geography: document.getElementById('strategic-geo').value.trim(),
+        known_partners: document.getElementById('strategic-partners').value.trim(),
+        target_persona: document.getElementById('strategic-persona').value.trim(),
+        additional_context: document.getElementById('strategic-extra').value.trim(),
+      }};
+      const pv = document.getElementById('strategic-provider').value;
+      if (pv) payload.provider = pv;
+      if (!payload.company_name) {{
+        status.textContent = 'Company name is required.';
+        return;
+      }}
+      btn.disabled = true;
+      status.textContent = 'Running 7 steps (may take a few minutes)…';
+      try {{
+        const res = await fetch(apiUrl('/api/strategic-brief'), {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify(payload)
+        }});
+        const data = await res.json().catch(() => ({{}}));
+        if (!res.ok) {{
+          status.textContent = '';
+          const rw = document.getElementById('strategic-result-wrap');
+          rw.innerHTML = '<p class="api-error">' + escape(data.error || 'Request failed') + '</p>';
+          rw.style.display = 'block';
+          document.getElementById('strategic-form-wrap').style.display = 'none';
+          return;
+        }}
+        status.textContent = '';
+        renderStrategicResults(data);
+      }} catch (e) {{
+        status.textContent = '';
+        document.getElementById('strategic-result-wrap').innerHTML = '<p class="api-error">' + escape(e.message || 'Network error') + '</p>';
+        document.getElementById('strategic-result-wrap').style.display = 'block';
+        document.getElementById('strategic-form-wrap').style.display = 'none';
+      }} finally {{
+        btn.disabled = false;
+      }}
+    }});
+
+    function onStrategicBrief(ev) {{
+      const idx = parseInt(ev.target.getAttribute('data-idx'), 10);
+      const row = currentRows[idx];
+      if (!row) return;
+      fillStrategicFormFromRow(row);
+      document.getElementById('modal-strategic-title').textContent = 'Strategic brief – ' + (row.merchant || '');
+      document.getElementById('modal-strategic').classList.add('open');
+    }}
 
     async function fetchNewsDataForEmail(row) {{
       const params = new URLSearchParams({{ merchant: row.merchant }});

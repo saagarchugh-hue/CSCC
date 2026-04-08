@@ -1,0 +1,45 @@
+You are a strategic sales coach. Using ONLY the material below (six sections from a prior analysis), produce a concise **Executive action summary** for the Account Manager.
+
+Output Markdown with exactly these sections:
+
+## What matters most (next conversation)
+- 3 bullets
+
+## Risks to validate
+- 3 bullets
+
+## Suggested next steps (no product pitch)
+- 3 bullets
+
+## One-line opener
+- Single sentence the AM can use to frame the meeting
+
+---
+
+### Company context
+{{s1}}
+
+---
+
+### Persona problems
+{{s2}}
+
+---
+
+### Current state
+{{s3}}
+
+---
+
+### Cost of inaction
+{{s4}}
+
+---
+
+### Discovery hooks
+{{s5}}
+
+---
+
+### Partner reframe
+{{s6}}
